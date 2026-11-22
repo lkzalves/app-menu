@@ -1,10 +1,13 @@
-import { HttpException, INestApplication } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
+import { LimiteExcedidoError } from '../src/fila/limite-excedido.error.js';
+import { aguardarFila, limparFilas, prefixoUnico } from './helpers/aguardar-fila.js';
 
 const MARCADOR = '__e2e_desc__';
 const IDIOMA = '__e2e_ds__'; // máx. 10 caracteres (limite do DTO); os pratos de teste levam este idioma
+const FILAS = ['descricoes'];
 const UUID_INEXISTENTE = '00000000-0000-0000-0000-000000000000';
 const DIA_MS = 24 * 60 * 60 * 1000;
 
@@ -34,7 +37,17 @@ describe('Descrições dos pratos (e2e)', () => {
     return { menuId: menu.id, dishIds };
   };
 
+  // Enfileira, espera o worker terminar e devolve o menu como o app o veria
+  const pedirDescricoes = async (menuId: string) => {
+    const res = await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(202);
+    await aguardarFila(app, FILAS);
+    const menu = await request(app.getHttpServer()).get(`/menus/${menuId}`).expect(200);
+    return { enfileirado: res.body, menu: menu.body };
+  };
+
   beforeAll(async () => {
+    // Prefixo próprio: os e2e rodam em paralelo e cada app de teste tem workers
+    process.env.REDIS_PREFIX = prefixoUnico('bull-e2e-desc');
     const { AppModule } = await import('./../src/app.module.js');
     const { PrismaService } = await import('./../src/prisma/prisma.service.js');
     const { WikipediaProvider } = await import('./../src/descricoes/wikipedia.provider.js');
@@ -52,6 +65,7 @@ describe('Descrições dos pratos (e2e)', () => {
   });
 
   afterAll(async () => {
+    await limparFilas(app);
     await prisma.menu.deleteMany({ where: { restaurante: MARCADOR } });
     await prisma.dish.deleteMany({ where: { nomes: { some: { idioma: IDIOMA } } } });
     await app.close();
@@ -61,11 +75,12 @@ describe('Descrições dos pratos (e2e)', () => {
     const { menuId, dishIds } = await criarMenu('Tiramisu');
     wikipediaFalsa.buscar.mockResolvedValue(achada());
 
-    const res = await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
+    const { enfileirado, menu } = await pedirDescricoes(menuId);
 
+    expect(enfileirado).toEqual({ pratos: 1 });
     expect(wikipediaFalsa.buscar).toHaveBeenCalledWith('Tiramisu', IDIOMA);
-    expect(res.body.itens[0].dish.descricao).toBe('Uma sobremesa italiana.');
-    expect(res.body.itens[0].dish.descricaoUrl).toBe('https://pt.wikipedia.org/wiki/Tiramis%C3%B9');
+    expect(menu.itens[0].dish.descricao).toBe('Uma sobremesa italiana.');
+    expect(menu.itens[0].dish.descricaoUrl).toBe('https://pt.wikipedia.org/wiki/Tiramis%C3%B9');
 
     const dish = await prisma.dish.findUniqueOrThrow({ where: { id: dishIds[0] } });
     expect(dish.descricaoBuscadaEm).toBeInstanceOf(Date);
@@ -74,13 +89,13 @@ describe('Descrições dos pratos (e2e)', () => {
     expect(get.body.itens[0].dish.descricao).toBe('Uma sobremesa italiana.');
   });
 
-  it('é idempotente e faz uma consulta só para dois itens do mesmo prato', async () => {
+  it('é idempotente: dois itens do mesmo prato viram um job e pedir de novo não consulta outra vez', async () => {
     const { menuId, dishIds } = await criarMenu('Lasagna');
     await prisma.menuItem.create({ data: { menuId, ordem: 1, nomeOriginal: 'Lasagna', dishId: dishIds[0] } });
     wikipediaFalsa.buscar.mockResolvedValue(achada());
 
-    await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
-    await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
+    expect((await pedirDescricoes(menuId)).enfileirado).toEqual({ pratos: 1 }); // dois itens, um job
+    await pedirDescricoes(menuId);
 
     expect(wikipediaFalsa.buscar).toHaveBeenCalledTimes(1);
   });
@@ -89,11 +104,11 @@ describe('Descrições dos pratos (e2e)', () => {
     const { menuId, dishIds } = await criarMenu('Prato Raro');
     wikipediaFalsa.buscar.mockResolvedValue(null);
 
-    const res = await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
-    expect(res.body.itens[0].dish.descricao).toBeNull();
-    expect(res.body.itens[0].dish.descricaoUrl).toBeNull();
+    const { menu } = await pedirDescricoes(menuId);
+    expect(menu.itens[0].dish.descricao).toBeNull();
+    expect(menu.itens[0].dish.descricaoUrl).toBeNull();
 
-    await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
+    await pedirDescricoes(menuId);
     expect(wikipediaFalsa.buscar).toHaveBeenCalledTimes(1); // segunda chamada: dentro dos 30 dias
 
     // Tentativa de 31 dias atrás: consulta de novo, e agora existe artigo
@@ -102,41 +117,35 @@ describe('Descrições dos pratos (e2e)', () => {
       data: { descricaoBuscadaEm: new Date(Date.now() - 31 * DIA_MS) },
     });
     wikipediaFalsa.buscar.mockResolvedValue(achada('Agora existe.'));
-    const depois = await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
+    const { menu: depois } = await pedirDescricoes(menuId);
 
     expect(wikipediaFalsa.buscar).toHaveBeenCalledTimes(2);
-    expect(depois.body.itens[0].dish.descricao).toBe('Agora existe.');
+    expect(depois.itens[0].dish.descricao).toBe('Agora existe.');
   });
 
-  it('erro do provider devolve 500 e não marca a tentativa: a próxima chamada tenta de novo', async () => {
-    const { menuId, dishIds } = await criarMenu('Prato Instavel');
-    wikipediaFalsa.buscar.mockRejectedValueOnce(new Error('rede caiu'));
+  it('erro do provider é tentado de novo (backoff) sem marcar a tentativa de "sem artigo"', async () => {
+    const { menuId } = await criarMenu('Prato Instavel');
+    wikipediaFalsa.buscar.mockRejectedValueOnce(new Error('rede caiu')).mockResolvedValue(achada());
 
-    await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(500);
-    const dish = await prisma.dish.findUniqueOrThrow({ where: { id: dishIds[0] } });
-    expect(dish.descricaoBuscadaEm).toBeNull();
+    const { menu } = await pedirDescricoes(menuId);
 
-    wikipediaFalsa.buscar.mockResolvedValue(achada());
-    const res = await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
-    expect(res.body.itens[0].dish.descricao).toBe('Uma sobremesa italiana.');
-  });
+    // Falha não gravou nada: a 2ª tentativa (após o backoff de 5 s) é que preencheu
+    expect(wikipediaFalsa.buscar).toHaveBeenCalledTimes(2);
+    expect(menu.itens[0].dish.descricao).toBe('Uma sobremesa italiana.');
+  }, 20_000);
 
-  it('429 propaga, mantém o que já foi gravado e a nova chamada continua de onde parou', async () => {
+  it('429 pausa a fila, mantém o que já foi gravado e o job é refeito sozinho', async () => {
     const { menuId } = await criarMenu('Pizza', 'Risotto');
     wikipediaFalsa.buscar
       .mockResolvedValueOnce(achada('Texto da pizza.'))
-      .mockRejectedValueOnce(new HttpException('limite', 429));
+      .mockRejectedValueOnce(new LimiteExcedidoError('Wikipedia', 200)) // espera curta: o teste não espera o Retry-After real
+      .mockResolvedValue(achada('Texto do risotto.'));
 
-    await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(429);
-    expect(wikipediaFalsa.buscar).toHaveBeenCalledTimes(2);
+    const { menu } = await pedirDescricoes(menuId);
 
-    wikipediaFalsa.buscar.mockResolvedValue(achada('Texto do risotto.'));
-    const res = await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
-
-    // A pizza já tinha texto: só o risotto foi consultado na segunda vez
     expect(wikipediaFalsa.buscar).toHaveBeenCalledTimes(3);
     expect(wikipediaFalsa.buscar).toHaveBeenLastCalledWith('Risotto', IDIOMA);
-    expect(res.body.itens.map((i: { dish: { descricao: string } }) => i.dish.descricao)).toEqual([
+    expect(menu.itens.map((i: { dish: { descricao: string } }) => i.dish.descricao)).toEqual([
       'Texto da pizza.',
       'Texto do risotto.',
     ]);
@@ -146,8 +155,10 @@ describe('Descrições dos pratos (e2e)', () => {
     const { menuId } = await criarMenu();
     await prisma.menuItem.create({ data: { menuId, ordem: 0, nomeOriginal: 'Item solto' } }); // dishId nulo
 
-    await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(200);
+    const res = await request(app.getHttpServer()).post(`/menus/${menuId}/descricoes`).expect(202);
+    await aguardarFila(app, FILAS);
 
+    expect(res.body).toEqual({ pratos: 0 });
     expect(wikipediaFalsa.buscar).not.toHaveBeenCalled();
   });
 

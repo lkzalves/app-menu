@@ -36,7 +36,7 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
   - Pixabay: `lang` = idioma do cardápio (`en` se não estiver entre os 26 aceitos), `image_type=photo`, `category=food`, `safesearch=true`; tira o artigo do início do nome
   - Só aceita o resultado se alguma tag contiver uma palavra do nome do prato; senão cai para a próxima fonte (a Pixabay não dá nota de relevância e erra pratos autorais)
   - Baixa a imagem para o storage; nunca usa a URL da Pixabay (hotlink proibido); respeita o cache de 24 h e o limite de 100 req/60 s; guarda fonte e crédito
-- [ ] 7. Fila + worker: OCR dos recortes e busca de foto assíncronos; SSE mandando cada prato assim que fica pronto
+- [x] 7. Fila + worker: OCR dos recortes e busca de foto assíncronos; SSE mandando cada prato assim que fica pronto
 - [ ] 8. App Ionic: câmera → cliente escolhe o idioma do cardápio (grava em Menu.idioma) → circular os nomes dos pratos → lista progressiva (foto ilustrativa + nome original) → "não é esse prato" (troca a foto e alimenta o catálogo)
 - [ ] 9. Produção: usuário anônimo por dispositivo, limite de uso por dispositivo, deploy, Sentry
 - [ ] 10. Extras: compartilhar resultado, histórico, filtros (vegetariano, alergênicos), sugestão automática dos títulos (caixas de linha do OCR) para o cliente só confirmar

@@ -46,9 +46,10 @@ export class MenusController {
     return this.menusService.addItem(id, dto);
   }
 
-  // Recebe os retângulos que o cliente circulou e cria um prato por recorte lido
+  // Recebe os retângulos que o cliente circulou, troca a lista de itens e enfileira o OCR de cada um.
+  // 202: os nomes chegam depois (acompanhe por GET /menus/:id/eventos)
   @Post(':id/pratos')
-  @HttpCode(200) // substitui a lista de pratos, então 200 em vez de 201
+  @HttpCode(202)
   marcarPratos(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MarcarPratosDto,
@@ -56,16 +57,16 @@ export class MenusController {
     return this.menusService.marcarPratos(id, dto.regioes);
   }
 
-  // Busca a foto ilustrativa de cada prato do menu (síncrono por enquanto; a etapa 7 move para a fila)
+  // Enfileira a busca da foto ilustrativa de cada prato. 202 = aceito, o worker faz depois
   @Post(':id/imagens')
-  @HttpCode(200)
+  @HttpCode(202)
   buscarImagens(@Param('id', ParseUUIDPipe) id: string) {
     return this.menusService.buscarImagens(id);
   }
 
-  // Busca a descrição curta (Wikipedia, em português) de cada prato do menu
+  // Enfileira a busca da descrição curta (Wikipedia, em português) de cada prato
   @Post(':id/descricoes')
-  @HttpCode(200)
+  @HttpCode(202)
   buscarDescricoes(@Param('id', ParseUUIDPipe) id: string) {
     return this.menusService.buscarDescricoes(id);
   }

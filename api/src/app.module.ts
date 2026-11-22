@@ -5,7 +5,9 @@ import { APP_PIPE } from '@nestjs/core';
 import { LocalDisk, StorageModule } from '@nestjs/storage';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { DescricoesModule } from './descricoes/descricoes.module.js';
 import { FilaModule } from './fila/fila.module.js';
+import { ImagensModule } from './imagens/imagens.module.js';
 import { MenusModule } from './menus/menus.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 
@@ -37,6 +39,8 @@ import { PrismaModule } from './prisma/prisma.module.js';
     FilaModule,
     PrismaModule,
     MenusModule,
+    ImagensModule, // GET /imagens/:id e o worker de fotos
+    DescricoesModule, // o worker de descrições
   ],
   controllers: [AppController],
   providers: [

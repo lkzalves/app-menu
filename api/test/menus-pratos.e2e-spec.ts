@@ -5,6 +5,11 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
+import {
+  aguardarFila,
+  limparFilas,
+  prefixoUnico,
+} from './helpers/aguardar-fila.js';
 
 // PNG 1x1 válido (o OCR é falso, só precisa de uma imagem aceita no upload)
 const PNG = Buffer.from(
@@ -17,6 +22,7 @@ const MARCADOR = '__e2e_pratos__';
 const IDIOMA = '__e2e_pr__';
 const NOME_SEM_IDIOMA = 'PRATO SEM IDIOMA E2E';
 const UUID_INEXISTENTE = '00000000-0000-0000-0000-000000000000';
+const FILAS = ['ocr', 'imagens', 'descricoes'];
 const regiao = (x = 10) => ({ x, y: 20, largura: 100, altura: 30 });
 
 describe('Marcar pratos (e2e)', () => {
@@ -25,39 +31,80 @@ describe('Marcar pratos (e2e)', () => {
   let prisma: import('../src/prisma/prisma.service.js').PrismaService;
   // OCR falso: o Tesseract real é lento e baixa idiomas pela rede
   const ocrFalso = { reconhecer: vi.fn(), reconhecerRegioes: vi.fn() };
+  // O OCR agora dispara a busca de foto e descrição sozinho: sem fontes falsas iria para a rede
+  const pixabayFalsa = { buscar: vi.fn() };
+  const wikipediaFalsa = { buscar: vi.fn() };
+
+  // Marca os pratos (202), espera o worker terminar tudo e devolve o menu como o app o veria
+  const marcar = async (id: string, regioes: ReturnType<typeof regiao>[]) => {
+    const res = await request(app.getHttpServer())
+      .post(`/menus/${id}/pratos`)
+      .send({ regioes })
+      .expect(202);
+    expect(res.body).toEqual({ itens: regioes.length });
+    await aguardarFila(app, FILAS);
+    const menu = await request(app.getHttpServer())
+      .get(`/menus/${id}`)
+      .expect(200);
+    return menu.body;
+  };
 
   const criarMenu = async (comFoto = true, idioma: string | null = IDIOMA) => {
     const { body } = await request(app.getHttpServer())
       .post('/menus')
       .send({ restaurante: MARCADOR, ...(idioma && { idioma }) });
     if (comFoto) {
-      await request(app.getHttpServer()).post(`/menus/${body.id}/foto`).attach('foto', PNG, 'c.png');
+      await request(app.getHttpServer())
+        .post(`/menus/${body.id}/foto`)
+        .attach('foto', PNG, 'c.png');
     }
     return body.id as string;
   };
 
   beforeAll(async () => {
+    // Prefixo próprio: os e2e rodam em paralelo e cada app de teste tem workers
+    process.env.REDIS_PREFIX = prefixoUnico('bull-e2e-pr');
     pasta = mkdtempSync(join(tmpdir(), 'app-menu-e2e-pratos-'));
     process.env.STORAGE_ROOT = pasta;
 
     const { AppModule } = await import('./../src/app.module.js');
     const { PrismaService } = await import('./../src/prisma/prisma.service.js');
     const { OcrProvider } = await import('./../src/ocr/ocr.provider.js');
+    const { PixabayProvider } =
+      await import('./../src/imagens/pixabay.provider.js');
+    const { WikipediaProvider } =
+      await import('./../src/descricoes/wikipedia.provider.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(OcrProvider)
       .useValue(ocrFalso)
+      .overrideProvider(PixabayProvider)
+      .useValue(pixabayFalsa)
+      .overrideProvider(WikipediaProvider)
+      .useValue(wikipediaFalsa)
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
     prisma = app.get(PrismaService);
   });
 
+  beforeEach(() => {
+    ocrFalso.reconhecerRegioes.mockReset();
+    pixabayFalsa.buscar.mockReset().mockResolvedValue(null);
+    wikipediaFalsa.buscar.mockReset().mockResolvedValue(null);
+  });
+
   afterAll(async () => {
+    await limparFilas(app);
     await prisma.menu.deleteMany({ where: { restaurante: MARCADOR } });
     await prisma.dish.deleteMany({
       where: {
         nomes: {
-          some: { OR: [{ idioma: IDIOMA }, { idioma: 'und', nomeNormalizado: 'prato sem idioma e2e' }] },
+          some: {
+            OR: [
+              { idioma: IDIOMA },
+              { idioma: 'und', nomeNormalizado: 'prato sem idioma e2e' },
+            ],
+          },
         },
       },
     });
@@ -65,104 +112,169 @@ describe('Marcar pratos (e2e)', () => {
     rmSync(pasta, { recursive: true, force: true });
   });
 
-  it('cria um prato por recorte, limpa o nome e grava a região (200)', async () => {
-    ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['TAGLIERE MISTO R$46', '| GAMBERI R$48']);
+  it('cria um item por recorte, limpa o nome, grava a região e deixa o menu CONCLUIDO', async () => {
+    ocrFalso.reconhecerRegioes
+      .mockResolvedValueOnce(['TAGLIERE MISTO R$46'])
+      .mockResolvedValueOnce(['| GAMBERI R$48']);
     const id = await criarMenu();
 
-    const res = await request(app.getHttpServer())
-      .post(`/menus/${id}/pratos`)
-      .send({ regioes: [regiao(10), regiao(200)] })
-      .expect(200);
+    const menu = await marcar(id, [regiao(10), regiao(200)]);
 
-    expect(res.body.itens).toHaveLength(2);
-    expect(res.body.itens[0]).toMatchObject({
+    expect(menu.status).toBe('CONCLUIDO');
+    expect(menu.itens).toHaveLength(2);
+    expect(menu.itens[0]).toMatchObject({
       ordem: 0,
+      status: 'PRONTO',
       nomeOriginal: 'TAGLIERE MISTO',
       regiaoX: 10,
       regiaoY: 20,
       regiaoLargura: 100,
       regiaoAltura: 30,
     });
-    expect(res.body.itens[1]).toMatchObject({ ordem: 1, nomeOriginal: 'GAMBERI', regiaoX: 200 });
-    // O OCR recebeu os bytes da foto e as regiões como o app mandou
-    expect(ocrFalso.reconhecerRegioes).toHaveBeenCalledWith(expect.any(Buffer), [regiao(10), regiao(200)]);
+    expect(menu.itens[1]).toMatchObject({
+      ordem: 1,
+      status: 'PRONTO',
+      nomeOriginal: 'GAMBERI',
+      regiaoX: 200,
+    });
+    // Um job por recorte: o OCR recebeu os bytes da foto e uma região de cada vez
+    expect(ocrFalso.reconhecerRegioes).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Buffer),
+      [regiao(10)],
+    );
+    expect(ocrFalso.reconhecerRegioes).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Buffer),
+      [regiao(200)],
+    );
+  });
+
+  it('responde 202 com itens PROCESSANDO e só vira PRONTO quando o worker lê o nome', async () => {
+    let liberar!: (textos: string[]) => void;
+    ocrFalso.reconhecerRegioes.mockReturnValueOnce(
+      new Promise<string[]>((r) => (liberar = r)),
+    );
+    const id = await criarMenu();
+
+    await request(app.getHttpServer())
+      .post(`/menus/${id}/pratos`)
+      .send({ regioes: [regiao()] })
+      .expect(202);
+    const durante = (
+      await request(app.getHttpServer()).get(`/menus/${id}`).expect(200)
+    ).body;
+    expect(durante.status).toBe('PROCESSANDO');
+    expect(durante.itens[0]).toMatchObject({
+      status: 'PROCESSANDO',
+      nomeOriginal: '',
+      dishId: null,
+    });
+
+    liberar(['RAVIOLI R$30']);
+    await aguardarFila(app, FILAS);
+    const depois = (
+      await request(app.getHttpServer()).get(`/menus/${id}`).expect(200)
+    ).body;
+    expect(depois.status).toBe('CONCLUIDO');
+    expect(depois.itens[0]).toMatchObject({
+      status: 'PRONTO',
+      nomeOriginal: 'RAVIOLI',
+    });
   });
 
   it('reenviar substitui os pratos, sem duplicar', async () => {
-    ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['PIZZA A', 'PIZZA B']);
+    ocrFalso.reconhecerRegioes
+      .mockResolvedValueOnce(['PIZZA A'])
+      .mockResolvedValueOnce(['PIZZA B']);
     const id = await criarMenu();
-    await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao(1), regiao(2)] });
+    await marcar(id, [regiao(1), regiao(2)]);
 
     ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['PIZZA C']);
-    const res = await request(app.getHttpServer())
-      .post(`/menus/${id}/pratos`)
-      .send({ regioes: [regiao(3)] })
-      .expect(200);
+    const menu = await marcar(id, [regiao(3)]);
 
-    expect(res.body.itens.map((i: { nomeOriginal: string }) => i.nomeOriginal)).toEqual(['PIZZA C']);
+    expect(
+      menu.itens.map((i: { nomeOriginal: string }) => i.nomeOriginal),
+    ).toEqual(['PIZZA C']);
   });
 
   it('descarta recorte que não virou texto e mantém a ordem dos demais', async () => {
-    ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['LASANHA', '  |  ', 'RISOTO R$ 40']);
+    ocrFalso.reconhecerRegioes
+      .mockResolvedValueOnce(['LASANHA'])
+      .mockResolvedValueOnce(['  |  '])
+      .mockResolvedValueOnce(['RISOTO R$ 40']);
     const id = await criarMenu();
 
-    const res = await request(app.getHttpServer())
-      .post(`/menus/${id}/pratos`)
-      .send({ regioes: [regiao(1), regiao(2), regiao(3)] })
-      .expect(200);
+    const menu = await marcar(id, [regiao(1), regiao(2), regiao(3)]);
 
-    expect(res.body.itens).toMatchObject([
+    expect(menu.status).toBe('CONCLUIDO'); // o descartado também conta como lido
+    expect(menu.itens).toMatchObject([
       { ordem: 0, nomeOriginal: 'LASANHA', regiaoX: 1 },
-      { ordem: 1, nomeOriginal: 'RISOTO', regiaoX: 3 },
+      { ordem: 2, nomeOriginal: 'RISOTO', regiaoX: 3 },
     ]);
   });
 
-  it('liga cada prato ao catálogo, com o idioma do menu', async () => {
+  it('liga cada prato ao catálogo, com o idioma do menu, e já pede foto e descrição dele', async () => {
     ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['IL TARTARE R$47']);
     const id = await criarMenu();
 
-    const res = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] }).expect(200);
+    const menu = await marcar(id, [regiao()]);
 
-    const nome = await prisma.dishName.findFirstOrThrow({ where: { dishId: res.body.itens[0].dishId } });
-    expect(nome).toMatchObject({ idioma: IDIOMA, nome: 'IL TARTARE', nomeNormalizado: 'tartare' });
+    const nome = await prisma.dishName.findFirstOrThrow({
+      where: { dishId: menu.itens[0].dishId },
+    });
+    expect(nome).toMatchObject({
+      idioma: IDIOMA,
+      nome: 'IL TARTARE',
+      nomeNormalizado: 'tartare',
+    });
+    // O worker de OCR enfileirou as duas buscas, que rodaram com o nome lido e o idioma do menu
+    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA);
+    expect(wikipediaFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA);
   });
 
   it('o mesmo prato em dois menus compartilha o dishId, mesmo com erro de OCR', async () => {
-    ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['I GAMBERI R$48']).mockResolvedValueOnce(['IGAMBERI']);
+    ocrFalso.reconhecerRegioes
+      .mockResolvedValueOnce(['I GAMBERI R$48'])
+      .mockResolvedValueOnce(['IGAMBERI']);
     const a = await criarMenu();
     const b = await criarMenu();
 
-    const ra = await request(app.getHttpServer()).post(`/menus/${a}/pratos`).send({ regioes: [regiao()] });
-    const rb = await request(app.getHttpServer()).post(`/menus/${b}/pratos`).send({ regioes: [regiao()] });
+    const ma = await marcar(a, [regiao()]);
+    const mb = await marcar(b, [regiao()]);
 
-    expect(ra.body.itens[0].dishId).toBeTruthy();
-    expect(rb.body.itens[0].dishId).toBe(ra.body.itens[0].dishId);
+    expect(ma.itens[0].dishId).toBeTruthy();
+    expect(mb.itens[0].dishId).toBe(ma.itens[0].dishId);
   });
 
   it('reenviar mantém o mesmo prato do catálogo', async () => {
     ocrFalso.reconhecerRegioes.mockResolvedValue(['PANNA COTTA']);
     const id = await criarMenu();
-    const um = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] });
-    const dois = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] });
-    ocrFalso.reconhecerRegioes.mockReset();
+    const um = await marcar(id, [regiao()]);
+    const dois = await marcar(id, [regiao()]);
 
-    expect(dois.body.itens).toHaveLength(1);
-    expect(dois.body.itens[0].dishId).toBe(um.body.itens[0].dishId);
+    expect(dois.itens).toHaveLength(1);
+    expect(dois.itens[0].dishId).toBe(um.itens[0].dishId);
   });
 
   it('menu sem idioma usa "und" no catálogo', async () => {
     ocrFalso.reconhecerRegioes.mockResolvedValueOnce([NOME_SEM_IDIOMA]);
     const id = await criarMenu(true, null);
 
-    const res = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] }).expect(200);
+    const menu = await marcar(id, [regiao()]);
 
-    const nome = await prisma.dishName.findFirstOrThrow({ where: { dishId: res.body.itens[0].dishId } });
+    const nome = await prisma.dishName.findFirstOrThrow({
+      where: { dishId: menu.itens[0].dishId },
+    });
     expect(nome.idioma).toBe('und');
   });
 
   it('menu sem foto responde 409', async () => {
     const id = await criarMenu(false);
-    await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] }).expect(409);
+    await request(app.getHttpServer())
+      .post(`/menus/${id}/pratos`)
+      .send({ regioes: [regiao()] })
+      .expect(409);
   });
 
   it('menu inexistente responde 404', () =>
@@ -174,13 +286,19 @@ describe('Marcar pratos (e2e)', () => {
   it.each([
     ['lista vazia', { regioes: [] }],
     ['sem o campo regioes', {}],
-    ['mais de 30 regiões', { regioes: Array.from({ length: 31 }, () => regiao()) }],
+    [
+      'mais de 30 regiões',
+      { regioes: Array.from({ length: 31 }, () => regiao()) },
+    ],
     ['largura zero', { regioes: [{ ...regiao(), largura: 0 }] }],
     ['x negativo', { regioes: [{ ...regiao(), x: -1 }] }],
     ['x decimal', { regioes: [{ ...regiao(), x: 1.5 }] }],
     ['campo extra na região', { regioes: [{ ...regiao(), foo: 1 }] }],
   ])('região inválida (%s) responde 400', async (_nome, corpo) => {
     const id = await criarMenu();
-    await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send(corpo).expect(400);
+    await request(app.getHttpServer())
+      .post(`/menus/${id}/pratos`)
+      .send(corpo)
+      .expect(400);
   });
 });

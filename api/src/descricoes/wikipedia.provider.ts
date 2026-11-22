@@ -1,9 +1,11 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { LimiteExcedidoError } from '../fila/limite-excedido.error.js';
 import { idiomaWikipedia, limparExtrato, variacoesTitulo } from './wikipedia.util.js';
 
 // A Wikimedia pede um User-Agent que identifique o cliente. Genérico: sem dados pessoais
 const USER_AGENT = 'app-menu/0.1 (projeto de estudo)';
 const IDIOMA_DESCRICAO = 'pt'; // a descrição sempre sai em português
+const ESPERA_PADRAO_S = 60;
 
 export interface DescricaoEncontrada {
   texto: string;
@@ -82,7 +84,9 @@ export class WikipediaProvider {
 
     const resposta = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
     if (resposta.status === 429) {
-      throw new HttpException('Limite de requisições da Wikipedia atingido; tente novamente em instantes', HttpStatus.TOO_MANY_REQUESTS);
+      // Retry-After vem em segundos (~21 s na prática); sem o header, espera 60 s
+      const segundos = Number(resposta.headers.get('Retry-After')) || ESPERA_PADRAO_S;
+      throw new LimiteExcedidoError('Wikipedia', segundos * 1000);
     }
     if (!resposta.ok) throw new Error(`Wikipedia respondeu HTTP ${resposta.status}`);
 

@@ -16,6 +16,12 @@ enum StatusMenu {
   ERRO
 }
 
+// Etapa do OCR de um recorte: PROCESSANDO até o worker ler o nome. Itens antigos e manuais já nascem PRONTO
+enum StatusItem {
+  PROCESSANDO
+  PRONTO
+}
+
 model Menu {
   id          String     @id @default(uuid())
   restaurante String?
@@ -32,7 +38,8 @@ model MenuItem {
   menuId        String
   menu          Menu     @relation(fields: [menuId], references: [id], onDelete: Cascade)
   ordem         Int
-  nomeOriginal  String
+  status        StatusItem @default(PRONTO)
+  nomeOriginal  String // vazio enquanto o item está PROCESSANDO
   nomeTraduzido String?
   descricao     String?
   preco         Decimal? @db.Decimal(10, 2)

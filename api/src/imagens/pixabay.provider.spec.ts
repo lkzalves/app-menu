@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import { LimiteExcedidoError } from '../fila/limite-excedido.error.js';
 import { PixabayProvider } from './pixabay.provider.js';
 
 const hit = (tags: string) => ({
@@ -14,12 +15,23 @@ const resposta = (hits: unknown[], init: ResponseInit = {}) =>
 describe('PixabayProvider', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let provider: PixabayProvider;
+  // Redis falso em memória: só o que o provider usa (get e set)
+  let guardado: Map<string, string>;
+  let redis: { get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const config = { getOrThrow: () => 'chave-falsa' } as unknown as ConfigService;
-    provider = new PixabayProvider(config);
+    const config = {
+      getOrThrow: () => 'chave-falsa',
+      get: () => undefined, // sem REDIS_PREFIX: o prefixo cai no padrão "bull"
+    } as unknown as ConfigService;
+    guardado = new Map();
+    redis = {
+      get: vi.fn(async (k: string) => guardado.get(k) ?? null),
+      set: vi.fn(async (k: string, v: string) => void guardado.set(k, v)),
+    };
+    provider = new PixabayProvider(config, redis as never);
   });
 
   afterEach(() => {
@@ -43,11 +55,15 @@ describe('PixabayProvider', () => {
   it('usa "en" quando o idioma não é aceito', async () => {
     fetchMock.mockResolvedValue(resposta([]));
     await provider.buscar('Ramen', 'und');
-    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('lang')).toBe('en');
+    expect(
+      new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('lang'),
+    ).toBe('en');
   });
 
   it('devolve o primeiro resultado cujas tags combinam, com fonte e crédito', async () => {
-    fetchMock.mockResolvedValue(resposta([hit('sunset, beach'), hit('tiramisu, dessert')]));
+    fetchMock.mockResolvedValue(
+      resposta([hit('sunset, beach'), hit('tiramisu, dessert')]),
+    );
     const r = await provider.buscar('Tiramisù', 'it');
     expect(r).toEqual({
       fonte: 'PIXABAY',
@@ -77,29 +93,47 @@ describe('PixabayProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('cache expira depois de 24 h', async () => {
-    vi.useFakeTimers();
-    fetchMock.mockImplementation(async () => resposta([]));
+  it('guarda a resposta no Redis por 24 h, com chave sem a chave da API', async () => {
+    fetchMock.mockResolvedValue(resposta([hit('tiramisu')]));
     await provider.buscar('Tiramisù', 'it');
-    vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000 + 1000);
-    await provider.buscar('Tiramisù', 'it');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    expect(redis.set).toHaveBeenCalledTimes(1);
+    const [chave, valor, modo, segundos] = redis.set.mock.calls[0];
+    expect(chave).toBe('bull:pixabay:it|tiramisù');
+    expect(chave).not.toContain('chave-falsa');
+    expect(JSON.parse(valor)).toHaveLength(1);
+    expect([modo, segundos]).toEqual(['EX', 24 * 60 * 60]);
   });
 
-  it('limite esgotado: responde o que veio, mas a próxima consulta vira 429 sem chamar a API', async () => {
+  it('cache já no Redis (de outro processo ou de antes do reinício): não chama a Pixabay', async () => {
+    guardado.set('bull:pixabay:it|tiramisù', JSON.stringify([hit('tiramisu')]));
+
+    expect(await provider.buscar('Tiramisù', 'it')).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('limite esgotado: responde o que veio, mas a próxima consulta lança LimiteExcedidoError sem chamar a API', async () => {
     fetchMock.mockResolvedValue(
-      resposta([hit('tiramisu')], { headers: { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '30' } }),
+      resposta([hit('tiramisu')], {
+        headers: { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '30' },
+      }),
     );
     expect(await provider.buscar('Tiramisù', 'it')).not.toBeNull();
 
-    await expect(provider.buscar('Pizza', 'it')).rejects.toMatchObject({ status: 429 });
+    await expect(provider.buscar('Pizza', 'it')).rejects.toBeInstanceOf(
+      LimiteExcedidoError,
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('HTTP 429 da Pixabay vira 429 nosso e bloqueia as próximas', async () => {
+  it('HTTP 429 da Pixabay vira LimiteExcedidoError e bloqueia as próximas', async () => {
     fetchMock.mockResolvedValue(new Response('', { status: 429 }));
-    await expect(provider.buscar('Pizza', 'it')).rejects.toMatchObject({ status: 429 });
-    await expect(provider.buscar('Ramen', 'it')).rejects.toMatchObject({ status: 429 });
+    await expect(provider.buscar('Pizza', 'it')).rejects.toBeInstanceOf(
+      LimiteExcedidoError,
+    );
+    await expect(provider.buscar('Ramen', 'it')).rejects.toBeInstanceOf(
+      LimiteExcedidoError,
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

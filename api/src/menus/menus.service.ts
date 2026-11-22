@@ -1,15 +1,23 @@
+import { InjectQueue } from '@nestjs/bullmq';
+import { randomUUID } from 'node:crypto';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDisk, StorageDisk } from '@nestjs/storage';
-import { CatalogoService } from '../catalogo/catalogo.service.js';
 import { Prisma } from '../generated/prisma/client.js';
-import { DescricoesService } from '../descricoes/descricoes.service.js';
-import { ImagensService } from '../imagens/imagens.service.js';
+import { Queue } from 'bullmq';
+import {
+  DadosJobOcr,
+  DadosJobPrato,
+  FILA_DESCRICOES,
+  FILA_IMAGENS,
+  FILA_OCR,
+  jobsDePratos,
+  OPCOES_JOB_PRATO,
+} from '../fila/fila.constants.js';
 import { OcrProvider } from '../ocr/ocr.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
 import { RegiaoDto } from './dto/marcar-pratos.dto.js';
-import { limparNomePrato } from './nome-prato.util.js';
 
 @Injectable()
 export class MenusService {
@@ -18,9 +26,9 @@ export class MenusService {
     private readonly prisma: PrismaService,
     @InjectDisk('fotos') private readonly fotos: StorageDisk,
     private readonly ocr: OcrProvider,
-    private readonly catalogo: CatalogoService,
-    private readonly imagens: ImagensService,
-    private readonly descricoes: DescricoesService,
+    @InjectQueue(FILA_OCR) private readonly filaOcr: Queue<DadosJobOcr>,
+    @InjectQueue(FILA_IMAGENS) private readonly filaImagens: Queue<DadosJobPrato>,
+    @InjectQueue(FILA_DESCRICOES) private readonly filaDescricoes: Queue<DadosJobPrato>,
   ) {}
 
   create(dto: CreateMenuDto) {
@@ -58,19 +66,19 @@ export class MenusService {
     return menu;
   }
 
-  // Busca a foto de cada prato do menu. Em sequência e idempotente: se uma fonte der 429 no meio,
-  // o que já foi gravado fica e uma nova chamada continua de onde parou
+  // Enfileira a busca de foto de cada prato (1 job por prato; o worker faz o trabalho). O worker de OCR
+  // já faz isso sozinho; este endpoint serve para reprocessar. O jobId fixo por prato evita duplicar
   async buscarImagens(id: string) {
     const { idioma, pratos } = await this.pratosDoMenu(id);
-    for (const p of pratos) await this.imagens.garantirImagem(p.dishId, p.nome, idioma);
-    return this.findOne(id);
+    await this.filaImagens.addBulk(jobsDePratos('imagem', pratos.map((p) => ({ ...p, idioma }))));
+    return { pratos: pratos.length };
   }
 
-  // Mesma ideia para a descrição (Wikipedia). Também em sequência e idempotente
+  // Mesma ideia para a descrição (Wikipedia)
   async buscarDescricoes(id: string) {
     const { idioma, pratos } = await this.pratosDoMenu(id);
-    for (const p of pratos) await this.descricoes.garantirDescricao(p.dishId, p.nome, idioma);
-    return this.findOne(id);
+    await this.filaDescricoes.addBulk(jobsDePratos('descricao', pratos.map((p) => ({ ...p, idioma }))));
+    return { pratos: pratos.length };
   }
 
   // Pratos distintos do menu (dois itens do mesmo prato compartilham foto e descrição) e o idioma
@@ -134,46 +142,45 @@ export class MenusService {
     }
   }
 
-  // O cliente circulou os nomes: lê só esses recortes e troca a lista de pratos do menu
+  // O cliente circulou os nomes: troca a lista de itens por um item PROCESSANDO por recorte e enfileira
+  // o OCR de cada um. O nome, o prato do catálogo e o status PRONTO chegam depois, pelo worker
   async marcarPratos(id: string, regioes: RegiaoDto[]) {
     const menu = await this.prisma.menu.findUnique({
       where: { id },
-      select: { fotoKey: true, idioma: true },
+      select: { fotoKey: true },
     });
     if (!menu) throw new NotFoundException('Menu não encontrado');
     if (!menu.fotoKey) throw new ConflictException('Menu sem foto: envie a foto antes de marcar os pratos');
 
-    const imagem = await this.fotos.getBuffer(menu.fotoKey);
-    const textos = await this.ocr.reconhecerRegioes(imagem, regioes);
+    // O id é gerado aqui para já poder virar o jobId. O app manda sempre a lista completa
+    const itens: Prisma.MenuItemCreateManyInput[] = regioes.map((r, ordem) => ({
+      id: randomUUID(),
+      menuId: id,
+      ordem,
+      status: 'PROCESSANDO',
+      nomeOriginal: '',
+      regiaoX: r.x,
+      regiaoY: r.y,
+      regiaoLargura: r.largura,
+      regiaoAltura: r.altura,
+    }));
 
-    // Recorte que não virou texto é descartado; ordem segue a lista que o app mandou
-    const lidos = regioes
-      .map((r, i) => ({ r, nome: limparNomePrato(textos[i] ?? '').slice(0, 200) })) // 200 = limite do DTO de item
-      .filter((p) => p.nome);
-
-    // "und" = idioma indeterminado (o seletor do cliente só chega no app). Em sequência, para dois
-    // nomes parecidos do mesmo cardápio não criarem dois pratos ao mesmo tempo
-    const idioma = menu.idioma ?? 'und';
-    const itens: Prisma.MenuItemCreateManyInput[] = [];
-    for (const [ordem, { r, nome }] of lidos.entries()) {
-      itens.push({
-        menuId: id,
-        ordem,
-        nomeOriginal: nome,
-        dishId: await this.catalogo.obterOuCriar(nome, idioma), // acha o prato no catálogo ou cria
-        regiaoX: r.x,
-        regiaoY: r.y,
-        regiaoLargura: r.largura,
-        regiaoAltura: r.altura,
-      });
-    }
-
-    // Transação: ou troca tudo ou não troca nada. O app manda sempre a lista completa
+    // Transação: ou troca tudo ou não troca nada. Jobs de OCR da lista antiga acham o item
+    // inexistente e saem sem fazer nada
     await this.prisma.$transaction([
       this.prisma.menuItem.deleteMany({ where: { menuId: id } }),
       this.prisma.menuItem.createMany({ data: itens }),
+      this.prisma.menu.update({ where: { id }, data: { status: 'PROCESSANDO' } }),
     ]);
-    return this.findOne(id);
+
+    await this.filaOcr.addBulk(
+      itens.map((i) => ({
+        name: 'ler',
+        data: { itemId: i.id! },
+        opts: { ...OPCOES_JOB_PRATO, jobId: `ocr-${i.id}` },
+      })),
+    );
+    return { itens: itens.length };
   }
 
   async addItem(menuId: string, dto: CreateMenuItemDto) {

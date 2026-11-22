@@ -1,3 +1,4 @@
+import { LimiteExcedidoError } from '../fila/limite-excedido.error.js';
 import { WikipediaProvider } from './wikipedia.provider.js';
 
 // Resposta da API de consulta (formatversion=2)
@@ -126,12 +127,20 @@ describe('WikipediaProvider', () => {
     expect(fetchMock.mock.calls[0][1]).toEqual({ headers: { 'User-Agent': 'app-menu/0.1 (projeto de estudo)' } });
   });
 
-  it('erro HTTP lança (para o chamador tentar de novo depois); 429 vira 429 nosso', async () => {
+  it('erro HTTP lança (para o chamador tentar de novo depois); 429 vira LimiteExcedidoError', async () => {
     fetchMock.mockResolvedValueOnce(new Response('', { status: 500 }));
     await expect(provider.buscar('Tiramisù', 'it')).rejects.toThrow('Wikipedia respondeu HTTP 500');
 
     fetchMock.mockResolvedValueOnce(new Response('', { status: 429 }));
-    await expect(provider.buscar('Tiramisù', 'it')).rejects.toMatchObject({ status: 429 });
+    await expect(provider.buscar('Tiramisù', 'it')).rejects.toBeInstanceOf(LimiteExcedidoError);
+  });
+
+  it('429 usa o Retry-After (segundos) como espera, ou 60 s se o header faltar', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '21' } }));
+    await expect(provider.buscar('Tiramisù', 'it')).rejects.toMatchObject({ esperaMs: 21_000 });
+
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 429 }));
+    await expect(provider.buscar('Tiramisù', 'it')).rejects.toMatchObject({ esperaMs: 60_000 });
   });
 
   it('erro dentro do JSON da API também lança', async () => {

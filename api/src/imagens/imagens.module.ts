@@ -1,12 +1,16 @@
 import { Module } from '@nestjs/common';
+import { EventosModule } from '../eventos/eventos.module.js';
+import { FilaModule } from '../fila/fila.module.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
+import { RedisModule } from '../redis/redis.module.js';
 import { IMAGE_PROVIDERS, ImageProvider } from './image.provider.js';
 import { ImagensController } from './imagens.controller.js';
+import { ImagensProcessor } from './imagens.processor.js';
 import { ImagensService } from './imagens.service.js';
 import { PixabayProvider } from './pixabay.provider.js';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, FilaModule, EventosModule, RedisModule],
   controllers: [ImagensController],
   providers: [
     PixabayProvider,
@@ -17,6 +21,7 @@ import { PixabayProvider } from './pixabay.provider.js';
       inject: [PixabayProvider],
     },
     ImagensService,
+    ImagensProcessor, // o worker da fila "imagens"
   ],
   exports: [ImagensService],
 })
