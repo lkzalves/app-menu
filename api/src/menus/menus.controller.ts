@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
@@ -42,6 +43,13 @@ export class MenusController {
     @Body() dto: CreateMenuItemDto,
   ) {
     return this.menusService.addItem(id, dto);
+  }
+
+  // Roda o OCR na foto já enviada e guarda o texto bruto em Menu.textoOcr
+  @Post(':id/ocr')
+  @HttpCode(200) // não cria recurso novo, então 200 em vez do 201 padrão do POST
+  executarOcr(@Param('id', ParseUUIDPipe) id: string) {
+    return this.menusService.executarOcr(id);
   }
 
   // Multipart, campo "foto". O tipo é checado pelos bytes da imagem (415 se não for imagem aceita)

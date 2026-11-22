@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDisk, StorageDisk } from '@nestjs/storage';
 import { Prisma } from '../generated/prisma/client.js';
+import { OcrProvider } from '../ocr/ocr.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
@@ -11,6 +12,7 @@ export class MenusService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectDisk('fotos') private readonly fotos: StorageDisk,
+    private readonly ocr: OcrProvider,
   ) {}
 
   create(dto: CreateMenuDto) {
@@ -46,6 +48,28 @@ export class MenusService {
     });
     if (menu.fotoKey) await this.fotos.delete(menu.fotoKey); // troca: apaga a foto antiga
     return atualizado;
+  }
+
+  // Síncrono por enquanto; no passo 8 vira job na fila
+  async executarOcr(id: string) {
+    const menu = await this.prisma.menu.findUnique({
+      where: { id },
+      select: { fotoKey: true },
+    });
+    if (!menu) throw new NotFoundException('Menu não encontrado');
+    if (!menu.fotoKey) throw new ConflictException('Menu sem foto: envie a foto antes do OCR');
+
+    try {
+      const imagem = await this.fotos.getBuffer(menu.fotoKey);
+      const texto = await this.ocr.reconhecer(imagem);
+      return await this.prisma.menu.update({
+        where: { id },
+        data: { textoOcr: texto, status: 'RECEBIDO' }, // sai de ERRO se for uma nova tentativa
+      });
+    } catch (e) {
+      await this.prisma.menu.update({ where: { id }, data: { status: 'ERRO' } });
+      throw e; // vira HTTP 500
+    }
   }
 
   async addItem(menuId: string, dto: CreateMenuItemDto) {

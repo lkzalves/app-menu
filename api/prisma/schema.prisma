@@ -22,6 +22,7 @@ model Menu {
   idioma      String?
   status      StatusMenu @default(RECEBIDO)
   fotoKey     String?    // chave do arquivo no storage (não o caminho)
+  textoOcr    String?    // texto bruto do OCR; o parser (passo 4) lê daqui
   criadoEm    DateTime   @default(now()) @db.Timestamptz(3)
   itens       MenuItem[]
 }
