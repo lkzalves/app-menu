@@ -1,9 +1,11 @@
+import { BullModule } from '@nestjs/bullmq';
 import { Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_PIPE } from '@nestjs/core';
 import { LocalDisk, StorageModule } from '@nestjs/storage';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { FilaModule } from './fila/fila.module.js';
 import { MenusModule } from './menus/menus.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 
@@ -21,6 +23,18 @@ import { PrismaModule } from './prisma/prisma.module.js';
         },
       }),
     }),
+    // Conexão única com o Redis para todas as filas (forRoot só aqui, no módulo raiz)
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const redis = new URL(config.getOrThrow<string>('REDIS_URL'));
+        return {
+          connection: { host: redis.hostname, port: Number(redis.port) || 6379 },
+          prefix: config.get<string>('REDIS_PREFIX') ?? 'bull',
+        };
+      },
+    }),
+    FilaModule,
     PrismaModule,
     MenusModule,
   ],

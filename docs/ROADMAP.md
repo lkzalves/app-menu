@@ -31,7 +31,8 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
 - [x] 3. OCR atrás de OcrProvider: Tesseract.js agora; Google Vision depois, se a qualidade pedir
 - [x] 4. Pratos marcados: o cliente circula os nomes na foto, o app envia os retângulos e a API faz o OCR de cada recorte (nome do prato), com testes usando cardápios reais
 - [x] 5. Catálogo de pratos: Dish + DishName (nome por idioma) + DishImage (fonte, licença, crédito, votos), busca aproximada com pg_trgm (nome normalizado no Node: minúsculas, sem acento, sem artigo; o unaccent do Postgres não é IMMUTABLE e não entra em índice)
-- [ ] 6. Busca de foto e descrição: cadeia de ImageProvider (catálogo → Wikidata → Pixabay → Brave), gravando no catálogo
+- [x] 6. Busca de foto e descrição: cadeia de ImageProvider (catálogo → Wikidata → Pixabay → Brave), gravando no catálogo
+  - Escopo entregue: catálogo → Pixabay (fotos) e Wikipedia (descrição em português, no Dish). Wikidata e Brave ficam como fontes futuras na mesma cadeia (token IMAGE_PROVIDERS)
   - Pixabay: `lang` = idioma do cardápio (`en` se não estiver entre os 26 aceitos), `image_type=photo`, `category=food`, `safesearch=true`; tira o artigo do início do nome
   - Só aceita o resultado se alguma tag contiver uma palavra do nome do prato; senão cai para a próxima fonte (a Pixabay não dá nota de relevância e erra pratos autorais)
   - Baixa a imagem para o storage; nunca usa a URL da Pixabay (hotlink proibido); respeita o cache de 24 h e o limite de 100 req/60 s; guarda fonte e crédito
