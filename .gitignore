@@ -63,3 +63,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Instruções do Claude / agentes
 CLAUDE.md
 agents.md
+ROADMAP.md

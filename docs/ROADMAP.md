@@ -27,9 +27,9 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
 ## Etapas
 
 - [x] 0. Ambiente: Node, Docker, Postgres e Redis via compose
-- [ ] 1. API base: Prisma 7, models Menu e MenuItem, CRUD com validação
-- [ ] 2. Upload da foto (disco local) ligado a um Menu
-- [ ] 3. OCR atrás de OcrProvider (Vision) + idioma detectado gravado no Menu
+- [x] 1. API base: Prisma 7, models Menu e MenuItem, CRUD com validação
+- [x] 2. Upload da foto (disco local) ligado a um Menu
+- [ ] 3. OCR atrás de OcrProvider: Tesseract.js agora; Google Vision depois, se a qualidade pedir
 - [ ] 4. Parser: texto do OCR → itens (nome, descrição, preço), com testes usando cardápios reais em pt, en, es, it
 - [ ] 5. Tradução atrás de TranslationProvider: nome em pt (para exibir) e em en (para buscar foto)
 - [ ] 6. Catálogo de pratos: Dish + DishName (nome por idioma) + DishImage (fonte, licença, crédito, votos), busca aproximada com pg_trgm + unaccent
