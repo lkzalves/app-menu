@@ -25,8 +25,8 @@ import { RedisService } from '../redis/redis.service.js';
 
 // Os eventos são só avisos: o app refaz GET /menus/:id para ver o que mudou
 export interface Evento {
-  tipo: 'item' | 'removido' | 'menu' | 'imagem' | 'descricao';
-  menuId?: string; // item, removido, menu
+  tipo: 'item' | 'removido' | 'menu' | 'imagem' | 'descricao' | 'ingrediente';
+  menuId?: string; // item, removido, menu, ingrediente
   dishId?: string; // imagem, descricao (o prato pode estar em vários menus)
 }
 

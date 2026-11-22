@@ -94,6 +94,44 @@ ion-skeleton-text.foto {
   margin: 0;
 }
 
+// Ingredientes: um por linha, embaixo das fotos
+.ingredientes {
+  margin-top: 14px;
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ion-color-medium);
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+  }
+
+  li {
+    margin: 3px 0;
+    overflow-wrap: anywhere;
+  }
+
+  .pt {
+    margin-left: 4px;
+  }
+
+  .fonte {
+    margin-left: 6px;
+    font-size: 11px;
+  }
+
+  .credito {
+    margin-top: 6px;
+  }
+}
+
 // Toda foto leva este selo: é imagem ilustrativa, não a foto do prato daquele restaurante
 .selo {
   position: absolute;

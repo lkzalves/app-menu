@@ -1,0 +1,22 @@
+[
+  {
+    "prato": "IL PROSCIUTTO ROSOLATO",
+    "x": 442, "y": 766, "largura": 326, "altura": 88,
+    "esperados": ["Fonduta de Queijo Grana Padano", "Geleia de limão siciliano", "Azeite de Oliva EV"]
+  },
+  {
+    "prato": "I GAMBERI",
+    "x": 442, "y": 988, "largura": 326, "altura": 88,
+    "esperados": ["Creme de Queijo Boursin", "Laranja", "Missô", "Camarões Rosa Selvagens", "Gengibre"]
+  },
+  {
+    "prato": "LE MELANZANE",
+    "x": 442, "y": 1114, "largura": 326, "altura": 42,
+    "esperados": ["Babaghanoush", "Tomates Secos", "Avelãs tostadas", "Azeite EV"]
+  },
+  {
+    "prato": "BAMBINI",
+    "x": 442, "y": 1186, "largura": 326, "altura": 72,
+    "esperados": ["Mozzarella Fior di Latte", "Queijo Parmesão", "Azeite de Oliva EV"]
+  }
+]

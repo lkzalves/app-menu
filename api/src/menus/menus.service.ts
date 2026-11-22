@@ -5,6 +5,7 @@ import { InjectDisk, serveFile, StorageDisk } from '@nestjs/storage';
 import { Prisma } from '../generated/prisma/client.js';
 import { Queue } from 'bullmq';
 import {
+  DadosJobDescricao,
   DadosJobOcr,
   DadosJobPrato,
   FILA_DESCRICOES,
@@ -19,7 +20,7 @@ import { OcrProvider } from '../ocr/ocr.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
-import { RegiaoDto } from './dto/marcar-pratos.dto.js';
+import { GrupoPratoDto } from './dto/marcar-pratos.dto.js';
 
 // Votos "não é esse prato" para tirar uma foto do ar. O catálogo é compartilhado: com vários
 // usuários (etapa 9), subir este número ou contar por dispositivo
@@ -35,7 +36,7 @@ export class MenusService {
     private readonly ocr: OcrProvider,
     @InjectQueue(FILA_OCR) private readonly filaOcr: Queue<DadosJobOcr>,
     @InjectQueue(FILA_IMAGENS) private readonly filaImagens: Queue<DadosJobPrato>,
-    @InjectQueue(FILA_DESCRICOES) private readonly filaDescricoes: Queue<DadosJobPrato>,
+    @InjectQueue(FILA_DESCRICOES) private readonly filaDescricoes: Queue<DadosJobDescricao>,
   ) {}
 
   create(dto: CreateMenuDto) {
@@ -54,6 +55,16 @@ export class MenusService {
           orderBy: { ordem: 'asc' },
           // Fotos ativas do prato, só com o que o app precisa (o arquivo sai por GET /imagens/:id)
           include: {
+            // Ingredientes na ordem do cardápio; a descrição vem do catálogo (pode ainda não existir)
+            ingredientes: {
+              orderBy: { ordem: 'asc' },
+              select: {
+                id: true,
+                ordem: true,
+                nomeOriginal: true,
+                ingrediente: { select: { nomePt: true, descricao: true, descricaoUrl: true } },
+              },
+            },
             dish: {
               select: {
                 descricao: true,
@@ -165,7 +176,7 @@ export class MenusService {
 
   // O cliente circulou os nomes: troca a lista de itens por um item PROCESSANDO por recorte e enfileira
   // o OCR de cada um. O nome, o prato do catálogo e o status PRONTO chegam depois, pelo worker
-  async marcarPratos(id: string, regioes: RegiaoDto[]) {
+  async marcarPratos(id: string, grupos: GrupoPratoDto[]) {
     const menu = await this.prisma.menu.findUnique({
       where: { id },
       select: { fotoKey: true },
@@ -174,7 +185,7 @@ export class MenusService {
     if (!menu.fotoKey) throw new ConflictException('Menu sem foto: envie a foto antes de marcar os pratos');
 
     // O id é gerado aqui para já poder virar o jobId. O app manda sempre a lista completa
-    const itens: Prisma.MenuItemCreateManyInput[] = regioes.map((r, ordem) => ({
+    const itens: Prisma.MenuItemCreateManyInput[] = grupos.map(({ prato: r, ingredientes }, ordem) => ({
       id: randomUUID(),
       menuId: id,
       ordem,
@@ -184,6 +195,10 @@ export class MenusService {
       regiaoY: r.y,
       regiaoLargura: r.largura,
       regiaoAltura: r.altura,
+      // Sem ingredientes circulados: fica null (o worker só lê o prato)
+      regioesIngredientes: ingredientes?.length
+        ? ingredientes.map(({ x, y, largura, altura }) => ({ x, y, largura, altura }))
+        : Prisma.DbNull,
     }));
 
     // Transação: ou troca tudo ou não troca nada. Jobs de OCR da lista antiga acham o item

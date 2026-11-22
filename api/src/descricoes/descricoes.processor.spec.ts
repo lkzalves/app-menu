@@ -9,13 +9,14 @@ const job = { data: { dishId: 'd1', nome: 'Tiramisu', idioma: 'it' } } as Job<{
 }>;
 
 describe('DescricoesProcessor', () => {
-  const descricoes = { garantirDescricao: vi.fn() };
+  const descricoes = { garantirDescricao: vi.fn(), garantirIngredientes: vi.fn() };
   const eventos = { publicar: vi.fn() };
   const rateLimit = vi.fn();
   let processor: DescricoesProcessor;
 
   beforeEach(() => {
     descricoes.garantirDescricao.mockReset();
+    descricoes.garantirIngredientes.mockReset();
     rateLimit.mockReset();
     eventos.publicar.mockReset();
     processor = new DescricoesProcessor(descricoes as never, eventos as never);
@@ -45,6 +46,33 @@ describe('DescricoesProcessor', () => {
       Worker.RateLimitError(),
     );
     expect(rateLimit).toHaveBeenCalledWith(30_000);
+  });
+
+  describe('job "ingredientes"', () => {
+    const jobIng = { name: 'ingredientes', data: { itemId: 'i1' } } as Job<{ itemId: string }>;
+
+    it('chama o service com o item e avisa o app do menu quando achou descrição', async () => {
+      descricoes.garantirIngredientes.mockResolvedValue('m1');
+      expect(await processor.process(jobIng as never)).toBe(true);
+      expect(descricoes.garantirIngredientes).toHaveBeenCalledWith('i1');
+      expect(descricoes.garantirDescricao).not.toHaveBeenCalled();
+      expect(eventos.publicar).toHaveBeenCalledWith({ tipo: 'ingrediente', menuId: 'm1' });
+    });
+
+    it('nada novo (null): não publica evento', async () => {
+      descricoes.garantirIngredientes.mockResolvedValue(null);
+      expect(await processor.process(jobIng as never)).toBe(false);
+      expect(eventos.publicar).not.toHaveBeenCalled();
+    });
+
+    it('limite da Wikipedia pausa a fila; erro comum é relançado', async () => {
+      descricoes.garantirIngredientes.mockRejectedValueOnce(new LimiteExcedidoError('Wikipedia', 30_000));
+      await expect(processor.process(jobIng as never)).rejects.toThrow(Worker.RateLimitError());
+      expect(rateLimit).toHaveBeenCalledWith(30_000);
+
+      descricoes.garantirIngredientes.mockRejectedValueOnce(new Error('rede caiu'));
+      await expect(processor.process(jobIng as never)).rejects.toThrow('rede caiu');
+    });
   });
 
   it('sem resultado (false) não publica evento', async () => {

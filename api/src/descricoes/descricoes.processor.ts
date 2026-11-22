@@ -2,7 +2,12 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { EventosService } from '../eventos/eventos.service.js';
-import { DadosJobPrato, FILA_DESCRICOES } from '../fila/fila.constants.js';
+import {
+  DadosJobDescricao,
+  DadosJobIngredientes,
+  DadosJobPrato,
+  FILA_DESCRICOES,
+} from '../fila/fila.constants.js';
 import { tratarLimite } from '../fila/limite-excedido.error.js';
 import { DescricoesService } from './descricoes.service.js';
 
@@ -19,8 +24,12 @@ export class DescricoesProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<DadosJobPrato>) {
-    const { dishId, nome, idioma } = job.data;
+  // Dois tipos de job na mesma fila, para o limite da Wikipedia valer para os dois: 'ingredientes'
+  // (todos os ingredientes de um item) e 'buscar' (a descrição de um prato)
+  async process(job: Job<DadosJobDescricao>) {
+    if (job.name === 'ingredientes') return this.processarIngredientes(job.data as DadosJobIngredientes);
+
+    const { dishId, nome, idioma } = job.data as DadosJobPrato;
     try {
       const achou = await this.descricoes.garantirDescricao(
         dishId,
@@ -34,10 +43,23 @@ export class DescricoesProcessor extends WorkerHost {
     }
   }
 
+  private async processarIngredientes({ itemId }: DadosJobIngredientes) {
+    try {
+      const menuId = await this.descricoes.garantirIngredientes(itemId);
+      if (menuId) await this.eventos.publicar({ tipo: 'ingrediente', menuId });
+      return menuId !== null;
+    } catch (e) {
+      return tratarLimite(this.worker, e);
+    }
+  }
+
   @OnWorkerEvent('failed')
-  aoFalhar(job: Job<DadosJobPrato> | undefined, erro: Error) {
-    this.logger.warn(
-      `Descrição do prato ${job?.data.dishId} falhou (tentativa ${job?.attemptsMade}): ${erro.message}`,
-    );
+  aoFalhar(job: Job<DadosJobDescricao> | undefined, erro: Error) {
+    if (!job) return;
+    const alvo =
+      job.name === 'ingredientes'
+        ? `dos ingredientes do item ${(job.data as DadosJobIngredientes).itemId}`
+        : `do prato ${(job.data as DadosJobPrato).dishId}`;
+    this.logger.warn(`Descrição ${alvo} falhou (tentativa ${job.attemptsMade}): ${erro.message}`);
   }
 }

@@ -27,14 +27,20 @@ describe('MenusApiService', () => {
     req.flush({ id: 'abc', idioma: 'it', fotoKey: null });
   });
 
-  it('marcarPratos: POST /menus/:id/pratos com { regioes }', () => {
-    const regioes = [{ x: 10, y: 20, largura: 300, altura: 40 }];
-    api.marcarPratos('abc', regioes).subscribe((r) => expect(r.itens).toBe(1));
+  it('marcarPratos: POST /menus/:id/pratos com { grupos } (prato + ingredientes)', () => {
+    const grupos = [
+      {
+        prato: { x: 10, y: 20, largura: 300, altura: 40 },
+        ingredientes: [{ x: 10, y: 70, largura: 300, altura: 30 }],
+      },
+      { prato: { x: 10, y: 200, largura: 300, altura: 40 }, ingredientes: [] },
+    ];
+    api.marcarPratos('abc', grupos).subscribe((r) => expect(r.itens).toBe(2));
 
     const req = http.expectOne(`${environment.apiUrl}/menus/abc/pratos`);
     expect(req.request.method).toBe('POST');
-    expect(req.request.body).toEqual({ regioes });
-    req.flush({ itens: 1 });
+    expect(req.request.body).toEqual({ grupos });
+    req.flush({ itens: 2 });
   });
 
   it('urlDaFoto, urlDaImagem e urlDosEventos montam as URLs da API', () => {

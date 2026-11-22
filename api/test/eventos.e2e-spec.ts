@@ -99,7 +99,7 @@ describe('Eventos SSE (e2e)', () => {
   const marcar = async (menuId: string) => {
     await request(app.getHttpServer())
       .post(`/menus/${menuId}/pratos`)
-      .send({ regioes: [regiao] })
+      .send({ grupos: [{ prato: regiao }] })
       .expect(202);
     await aguardarFila(app, FILAS);
   };

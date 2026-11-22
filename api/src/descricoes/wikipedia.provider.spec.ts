@@ -143,6 +143,111 @@ describe('WikipediaProvider', () => {
     await expect(provider.buscar('Tiramisù', 'it')).rejects.toMatchObject({ esperaMs: 60_000 });
   });
 
+  describe('buscarVarios (ingredientes)', () => {
+    it('resolve vários nomes em 2 consultas, tentando o singular, e devolve o nome em português', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          api({
+            pages: [
+              { title: 'Pomodori', missing: true },
+              { title: 'Pomodoro', langlinks: [{ lang: 'pt', title: 'Tomate' }] },
+              { title: 'Pomodore', missing: true },
+              { title: 'Pomodorio', missing: true },
+              { title: 'Mozzarella', langlinks: [{ lang: 'pt', title: 'Mozzarella' }] },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          api({
+            pages: [
+              { title: 'Tomate', extract: 'O tomate (Solanum lycopersicum) é o fruto do tomateiro.' },
+              { title: 'Mozzarella', extract: 'A mozzarella é um queijo fresco.' },
+            ],
+          }),
+        );
+
+      const r = await provider.buscarVarios(['pomodori', 'mozzarella'], 'it');
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const [it, pt] = [consultaUrl(fetchMock, 0), consultaUrl(fetchMock, 1)];
+      expect(it.host).toBe('it.wikipedia.org');
+      expect(it.searchParams.get('titles')).toBe('Pomodori|Pomodoro|Pomodore|Pomodorio|Mozzarella');
+      expect(it.searchParams.get('lllang')).toBe('pt');
+      expect(pt.host).toBe('pt.wikipedia.org');
+      expect(pt.searchParams.get('titles')).toBe('Tomate|Mozzarella');
+      expect(pt.searchParams.get('exintro')).toBe('1');
+      expect(pt.searchParams.get('exlimit')).toBe('20');
+      expect(r.get('pomodori')).toEqual({
+        nomePt: 'Tomate',
+        texto: 'O tomate é o fruto do tomateiro.',
+        url: 'https://pt.wikipedia.org/wiki/Tomate',
+      });
+      expect(r.get('mozzarella')?.nomePt).toBe('Mozzarella');
+    });
+
+    it('sem artigo no idioma do cardápio, tenta o título direto na wiki pt (ingredientes em português)', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          api({ pages: [{ title: 'Tomates Secos', missing: true }, { title: 'Tomates secos', missing: true }] }),
+        )
+        .mockResolvedValueOnce(
+          api({ pages: [{ title: 'Tomates secos', extract: 'Tomates secos são tomates desidratados.' }] }),
+        );
+
+      const r = await provider.buscarVarios(['Tomates Secos'], 'it');
+
+      expect(consultaUrl(fetchMock, 1).host).toBe('pt.wikipedia.org');
+      expect(consultaUrl(fetchMock, 1).searchParams.get('titles')).toBe('Tomates Secos|Tomates secos');
+      expect(r.get('Tomates Secos')).toMatchObject({ nomePt: 'Tomates secos', url: 'https://pt.wikipedia.org/wiki/Tomates_secos' });
+    });
+
+    it('cardápio em português ou sem idioma vai direto à wiki pt, numa consulta só', async () => {
+      // Uma resposta nova a cada chamada: o corpo de um Response só pode ser lido uma vez
+      fetchMock.mockImplementation(async () =>
+        api({ pages: [{ title: 'Laranja', extract: 'A laranja é um fruto cítrico.' }] }),
+      );
+
+      expect((await provider.buscarVarios(['Laranja'], 'pt-BR')).get('Laranja')?.texto).toBe('A laranja é um fruto cítrico.');
+      expect(await provider.buscarVarios(['Laranja'], 'und')).toHaveProperty('size', 1);
+      expect(fetchMock).toHaveBeenCalledTimes(2); // uma por chamada
+    });
+
+    it('nome sem artigo, desambiguação ou resumo vazio não entra no resultado', async () => {
+      fetchMock.mockResolvedValue(
+        api({
+          pages: [
+            { title: 'Pepe', pageprops: { disambiguation: '' }, extract: 'Pepe pode ser...' },
+            { title: 'Raro', missing: true },
+            { title: 'Vazio', extract: ' () ' },
+          ],
+        }),
+      );
+
+      const r = await provider.buscarVarios(['Pepe', 'Raro', 'Vazio'], 'pt');
+
+      expect(r.size).toBe(0);
+    });
+
+    it('divide em consultas de até 20 títulos (limite dos resumos da API)', async () => {
+      fetchMock.mockImplementation(async () => api({ pages: [] }));
+      const nomes = Array.from({ length: 25 }, (_, i) => `Item${i}`);
+
+      await provider.buscarVarios(nomes, 'und');
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(consultaUrl(fetchMock, 0).searchParams.get('titles')!.split('|')).toHaveLength(20);
+      expect(consultaUrl(fetchMock, 1).searchParams.get('titles')!.split('|')).toHaveLength(5);
+    });
+
+    it('lista vazia não consulta; 429 vira LimiteExcedidoError', async () => {
+      expect((await provider.buscarVarios([], 'it')).size).toBe(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      fetchMock.mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '21' } }));
+      await expect(provider.buscarVarios(['Tomate'], 'it')).rejects.toMatchObject({ esperaMs: 21_000 });
+    });
+  });
+
   it('erro dentro do JSON da API também lança', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'badvalue' } }), { status: 200 }));
     await expect(provider.buscar('Tiramisù', 'it')).rejects.toThrow('badvalue');

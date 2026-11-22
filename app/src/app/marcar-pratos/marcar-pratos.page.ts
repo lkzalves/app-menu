@@ -17,16 +17,26 @@ import {
 } from '@ionic/angular';
 import { addIcons } from 'ionicons';
 import { add, arrowUndo, remove } from 'ionicons/icons';
+import {
+  MAX_INGREDIENTES_POR_PRATO,
+  MAX_PRATOS,
+  adicionarIngrediente,
+  adicionarPrato,
+  desfazer,
+  motivoSemIngrediente,
+  removerIngrediente,
+  removerPrato,
+} from '../core/grupos';
 import { MenusApiService } from '../core/menus-api.service';
-import { Ponto, Regiao, Tamanho, telaParaFoto, tracoParaRegiao } from '../core/regiao';
+import { GrupoPrato, Ponto, Tamanho, telaParaFoto, tracoParaRegiao } from '../core/regiao';
 
 // Espessura do marca-texto na TELA, em px: com mais zoom ele cobre menos da foto (uma linha só)
 const ESPESSURA_TELA = 28;
 const COMPRIMENTO_MINIMO_TELA = 10; // traço menor que isso é toque acidental
-const MAX_REGIOES = 30; // o mesmo limite da API
 const ZOOM_MAXIMO = 4;
 
-type Modo = 'marcar' | 'mover';
+// prato = marca-texto amarelo; ingredientes = vermelho, ligado ao último prato circulado; mover = rola a foto
+type Modo = 'prato' | 'ingredientes' | 'mover';
 
 @Component({
   selector: 'app-marcar-pratos',
@@ -55,14 +65,16 @@ export class MarcarPratosPage {
   // ?t=: a URL é a mesma depois de trocar a foto; sem isso o navegador poderia mostrar a antiga
   readonly urlFoto = `${this.api.urlDaFoto(this.menuId)}?t=${Date.now()}`;
   readonly espessura = ESPESSURA_TELA;
+  readonly maxIngredientes = MAX_INGREDIENTES_POR_PRATO;
 
   // Tamanho REAL da foto (naturalWidth/Height): os retângulos são em pixels dela
   readonly foto = signal<Tamanho | null>(null);
   readonly erroFoto = signal(false);
-  readonly regioes = signal<Regiao[]>([]);
+  // Pratos na ordem em que foram circulados, cada um com as linhas de ingredientes dele
+  readonly grupos = signal<GrupoPrato[]>([]);
   readonly traco = signal<Ponto[]>([]); // o traço em andamento, em pixels da foto
   readonly tracoSvg = computed(() => this.traco().map((p) => `${p.x},${p.y}`).join(' '));
-  readonly modo = signal<Modo>('marcar');
+  readonly modo = signal<Modo>('prato');
   readonly zoom = signal(1);
   readonly enviando = signal(false);
 
@@ -77,7 +89,7 @@ export class MarcarPratosPage {
   }
 
   mudarModo(valor: unknown) {
-    if (valor === 'marcar' || valor === 'mover') this.modo.set(valor);
+    if (valor === 'prato' || valor === 'ingredientes' || valor === 'mover') this.modo.set(valor);
   }
 
   mudarZoom(delta: number) {
@@ -86,8 +98,20 @@ export class MarcarPratosPage {
 
   // --- Gesto: pointer events servem para mouse e dedo ---
 
-  aoPressionar(evento: PointerEvent) {
-    if (this.modo() !== 'marcar' || !this.foto()) return;
+  async aoPressionar(evento: PointerEvent) {
+    if (this.modo() === 'mover' || !this.foto()) return;
+
+    // Antes de começar o traço: ingrediente precisa de um prato antes e tem limite por prato
+    if (this.modo() === 'ingredientes') {
+      const motivo = motivoSemIngrediente(this.grupos());
+      if (motivo === 'sem-prato') return this.avisar('Circule um prato primeiro.');
+      if (motivo === 'limite') {
+        return this.avisar(`No máximo ${MAX_INGREDIENTES_POR_PRATO} linhas de ingredientes por prato.`);
+      }
+    } else if (this.grupos().length >= MAX_PRATOS) {
+      return this.avisar(`No máximo ${MAX_PRATOS} pratos por vez.`);
+    }
+
     // Captura: continua recebendo o movimento mesmo se o dedo sair da camada
     (evento.currentTarget as Element).setPointerCapture(evento.pointerId);
     this.traco.set([this.ponto(evento)]);
@@ -98,7 +122,7 @@ export class MarcarPratosPage {
     this.traco.update((t) => [...t, this.ponto(evento)]);
   }
 
-  async aoSoltar(evento: PointerEvent) {
+  aoSoltar(evento: PointerEvent) {
     const foto = this.foto();
     const pontos = this.traco();
     this.traco.set([]);
@@ -110,11 +134,11 @@ export class MarcarPratosPage {
     const regiao = tracoParaRegiao(pontos, ESPESSURA_TELA * escala, foto, COMPRIMENTO_MINIMO_TELA * escala);
     if (!regiao) return;
 
-    if (this.regioes().length >= MAX_REGIOES) {
-      await this.avisar(`No máximo ${MAX_REGIOES} pratos por vez.`);
-      return;
+    if (this.modo() === 'ingredientes') {
+      this.grupos.update((g) => adicionarIngrediente(g, regiao));
+    } else {
+      this.grupos.update((g) => adicionarPrato(g, regiao));
     }
-    this.regioes.update((r) => [...r, regiao]);
   }
 
   aoCancelar() {
@@ -126,27 +150,33 @@ export class MarcarPratosPage {
     return telaParaFoto(evento.clientX, evento.clientY, caixa, this.foto()!);
   }
 
-  // --- Lista de regiões ---
+  // --- Lista de pratos e ingredientes ---
 
+  // Tira o último traço: o último ingrediente do último prato ou, se não tem, o próprio prato
   desfazer() {
-    this.regioes.update((r) => r.slice(0, -1));
+    this.grupos.update(desfazer);
   }
 
-  remover(indice: number) {
-    this.regioes.update((r) => r.filter((_, i) => i !== indice));
+  // Remover um prato leva os ingredientes dele junto
+  removerPrato(indice: number) {
+    this.grupos.update((g) => removerPrato(g, indice));
+  }
+
+  removerIngrediente(indicePrato: number, indiceIngrediente: number) {
+    this.grupos.update((g) => removerIngrediente(g, indicePrato, indiceIngrediente));
   }
 
   async enviar() {
-    const regioes = this.regioes();
-    if (regioes.length === 0) return;
+    const grupos = this.grupos();
+    if (grupos.length === 0) return;
 
     this.enviando.set(true);
     try {
-      await firstValueFrom(this.api.marcarPratos(this.menuId, regioes));
+      await firstValueFrom(this.api.marcarPratos(this.menuId, grupos));
       // Os itens já existem (PROCESSANDO); a lista abre o SSE e mostra os pratos conforme ficam prontos
       await this.router.navigate(['/menus', this.menuId]);
     } catch {
-      // As regiões continuam na tela para tentar de novo
+      // As marcações continuam na tela para tentar de novo
       await this.avisar('Não foi possível enviar. Confira a conexão e tente de novo.');
     } finally {
       this.enviando.set(false);

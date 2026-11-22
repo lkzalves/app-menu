@@ -53,6 +53,19 @@
   }
 }
 
+// Modo "Circular ingredientes": o marca-texto fica vermelho
+.camada polyline.ingrediente {
+  stroke: rgba(230, 30, 30, 0.5);
+}
+
+.amarelo {
+  color: #b38f00; // o amarelo puro some no fundo claro
+}
+
+.vermelho {
+  color: #d81e1e;
+}
+
 .marcando .camada {
   pointer-events: auto;
   touch-action: none; // sem isso o navegador rouba o gesto para rolar a página
@@ -76,6 +89,17 @@
     background: var(--ion-color-primary);
     color: var(--ion-color-primary-contrast);
     font-size: 12px;
+  }
+
+  // Linha de ingredientes: vermelha, e o rótulo leva o número do prato a que pertence
+  &.ingrediente {
+    border-color: #d81e1e;
+    background: rgba(216, 30, 30, 0.15);
+
+    .rotulo {
+      background: #d81e1e;
+      color: #fff;
+    }
   }
 }
 

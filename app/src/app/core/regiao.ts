@@ -17,6 +17,13 @@ export interface Regiao {
   altura: number;
 }
 
+// Um prato circulado (amarelo) e as linhas de ingredientes circuladas depois dele (vermelho).
+// É o formato de cada item de `grupos` em POST /menus/:id/pratos
+export interface GrupoPrato {
+  prato: Regiao;
+  ingredientes: Regiao[];
+}
+
 // Posição e tamanho da foto na tela (getBoundingClientRect)
 export interface CaixaNaTela {
   left: number;

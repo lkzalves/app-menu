@@ -21,6 +21,7 @@ import { restaurantOutline } from 'ionicons/icons';
 import { EstadoAoVivo, acompanharMenu } from '../core/acompanhar-menu';
 import { TipoEvento, abrirEventos } from '../core/eventos-sse';
 import { nomeDaFonte } from '../core/fonte-imagem';
+import { nomeEmPortugues } from '../core/ingredientes';
 import { ImagemDoPrato, ItemDoMenu, MenusApiService } from '../core/menus-api.service';
 
 @Component({
@@ -48,6 +49,7 @@ export class ListaPratosPage {
 
   readonly menuId = inject(ActivatedRoute).snapshot.paramMap.get('id')!;
   readonly nomeDaFonte = nomeDaFonte;
+  readonly nomeEmPortugues = nomeEmPortugues;
 
   readonly estado = signal<EstadoAoVivo>({ menu: null, semConexao: false });
   readonly itens = computed(() => this.estado().menu?.itens ?? []);
@@ -83,6 +85,11 @@ export class ListaPratosPage {
   // Até 3 fotos ativas do prato (a API já limita); sem nenhuma, a tela mostra um ícone neutro
   fotos(item: ItemDoMenu): ImagemDoPrato[] {
     return item.dish?.imagens ?? [];
+  }
+
+  // Algum ingrediente do prato já tem descrição? Aí a tela mostra o crédito da Wikipédia (CC BY-SA)
+  temDescricaoDeIngrediente(item: ItemDoMenu): boolean {
+    return item.ingredientes.some((i) => !!i.ingrediente?.descricao);
   }
 
   urlDaImagem(imagemId: string) {

@@ -20,6 +20,21 @@ export const OPCOES_JOB_PRATO = {
   backoff: { type: 'exponential', delay: 5_000 },
 } as const;
 
+// Job da fila descricoes que busca a descrição de TODOS os ingredientes de um item (1 job por prato
+// do cardápio; a Wikipedia aceita vários títulos por consulta). O idioma vem do menu do item
+export interface DadosJobIngredientes {
+  itemId: string;
+}
+
+// A fila descricoes tem dois tipos de job, separados por job.name: 'buscar' (prato) e 'ingredientes'
+export type DadosJobDescricao = DadosJobPrato | DadosJobIngredientes;
+
+export const jobIngredientes = (itemId: string) => ({
+  name: 'ingredientes',
+  data: { itemId },
+  opts: { ...OPCOES_JOB_PRATO, jobId: `ingredientes-${itemId}` },
+});
+
 // Dados de um job de OCR: um recorte (MenuItem) por job
 export interface DadosJobOcr {
   itemId: string;

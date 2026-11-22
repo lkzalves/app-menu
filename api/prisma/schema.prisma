@@ -48,12 +48,58 @@ model MenuItem {
   regiaoY       Int?
   regiaoLargura Int?
   regiaoAltura  Int?
+  // Linhas de ingredientes circuladas (vermelho): [{x,y,largura,altura}] em pixels da foto.
+  // Json porque só o worker de OCR lê e nunca se consulta por ela
+  regioesIngredientes Json?
   // Prato canônico do catálogo; SetNull: apagar o prato não apaga o item do cardápio
   dishId        String?
   dish          Dish?    @relation(fields: [dishId], references: [id], onDelete: SetNull)
+  ingredientes  MenuItemIngrediente[]
 
   @@index([menuId]) // Postgres não cria índice em FK sozinho
   @@index([dishId])
+}
+
+// Ingrediente como este cardápio escreve, na ordem em que aparece. Cada restaurante tem a sua lista
+model MenuItemIngrediente {
+  id            String       @id @default(uuid())
+  menuItemId    String
+  menuItem      MenuItem     @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  ordem         Int
+  nomeOriginal  String // como o OCR leu
+  // Ingrediente do catálogo; SetNull: apagar do catálogo não apaga a linha do cardápio
+  ingredienteId String?
+  ingrediente   Ingrediente? @relation(fields: [ingredienteId], references: [id], onDelete: SetNull)
+
+  @@index([menuItemId])
+  @@index([ingredienteId])
+}
+
+// Ingrediente canônico, compartilhado entre cardápios: a descrição é buscada uma vez só
+model Ingrediente {
+  id                 String                @id @default(uuid())
+  criadoEm           DateTime              @default(now()) @db.Timestamptz(3)
+  nomePt             String? // título do artigo em português ("Tomate"), mostrado entre parênteses
+  // Descrição curta em português (Wikipedia, CC BY-SA 4.0: o app mostra o crédito com o link)
+  descricao          String?
+  descricaoUrl       String?
+  descricaoBuscadaEm DateTime?             @db.Timestamptz(3) // quando tentamos; evita repetir sem artigo
+  nomes              IngredienteNome[]
+  itens              MenuItemIngrediente[]
+}
+
+// Nome do ingrediente num idioma. Busca por nomeNormalizado EXATO (sem pg_trgm: nomes curtos
+// e parecidos, como "pepe" e "pere", são ingredientes diferentes)
+model IngredienteNome {
+  id              String      @id @default(uuid())
+  ingredienteId   String
+  ingrediente     Ingrediente @relation(fields: [ingredienteId], references: [id], onDelete: Cascade)
+  nome            String
+  nomeNormalizado String
+  idioma          String
+
+  @@unique([idioma, nomeNormalizado])
+  @@index([ingredienteId])
 }
 
 enum FonteImagem {

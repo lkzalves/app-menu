@@ -29,8 +29,28 @@ export function variacoesTitulo(nome: string): string[] {
   return [...new Set(candidatos)];
 }
 
-// Resumo da Wikipedia → texto curto: sem parênteses (pronúncia, grafias alternativas), até 300 caracteres
-export function limparExtrato(texto: string): string {
+// Plural → singular, por idioma: [fim da palavra, troca]. Só palpites; a busca tenta todos e vale o
+// primeiro título que existir
+const REGRAS_SINGULAR: Record<string, [RegExp, string][]> = {
+  it: [[/che$/, 'ca'], [/ghe$/, 'ga'], [/chi$/, 'co'], [/ghi$/, 'go'], [/i$/, 'o'], [/i$/, 'e'], [/i$/, 'io'], [/e$/, 'a']],
+  es: [[/es$/, ''], [/s$/, '']],
+  pt: [[/ões$/, 'ão'], [/ães$/, 'ão'], [/es$/, ''], [/s$/, '']],
+  en: [[/ies$/, 'y'], [/oes$/, 'o'], [/es$/, ''], [/s$/, '']],
+};
+
+// Ingrediente de uma palavra no plural ("pomodori", "melanzane") → formas no singular a tentar
+// (o título do artigo costuma estar no singular). Mais de uma palavra ou palavra curta: nenhuma
+export function variacoesSingular(nome: string, idioma: string): string[] {
+  const palavra = nome.trim().toLocaleLowerCase();
+  const regras = REGRAS_SINGULAR[idiomaWikipedia(idioma) ?? ''];
+  if (!regras || palavra.length < 4 || /\s/.test(palavra)) return [];
+
+  const formas = regras.filter(([fim]) => fim.test(palavra)).map(([fim, troca]) => palavra.replace(fim, troca));
+  return [...new Set(formas)].filter((f) => f !== palavra && f.length >= 3);
+}
+
+// Resumo da Wikipedia → texto curto: sem parênteses (pronúncia, grafias alternativas), até `tamanho` caracteres
+export function limparExtrato(texto: string, tamanho = TAMANHO_MAXIMO): string {
   let t = texto;
   let anterior: string;
   do {
@@ -39,10 +59,10 @@ export function limparExtrato(texto: string): string {
   } while (t !== anterior);
   t = t.replace(/\s+/g, ' ').trim();
 
-  if (t.length <= TAMANHO_MAXIMO) return t;
-  const corte = t.slice(0, TAMANHO_MAXIMO);
+  if (t.length <= tamanho) return t;
+  const corte = t.slice(0, tamanho);
   const fimFrase = corte.lastIndexOf('. ');
-  if (fimFrase >= 100) return corte.slice(0, fimFrase + 1); // prefere terminar numa frase inteira
+  if (fimFrase >= tamanho / 3) return corte.slice(0, fimFrase + 1); // prefere terminar numa frase inteira
   const ultimoEspaco = corte.lastIndexOf(' ');
   const semPalavraPartida = ultimoEspaco > 0 ? corte.slice(0, ultimoEspaco) : corte;
   return semPalavraPartida.replace(/[,;:]$/, '') + '…';

@@ -1,4 +1,31 @@
-import { idiomaWikipedia, limparExtrato, variacoesTitulo } from './wikipedia.util.js';
+import { idiomaWikipedia, limparExtrato, variacoesSingular, variacoesTitulo } from './wikipedia.util.js';
+
+describe('variacoesSingular', () => {
+  it.each([
+    ['pomodori', 'it', ['pomodoro', 'pomodore', 'pomodorio']],
+    ['melanzane', 'it', ['melanzana']],
+    ['zucchine', 'it', ['zucchina']],
+    ['zucche', 'it', ['zucca', 'zuccha']],
+    ['Funghi', 'it', ['fungo', 'fungho', 'funghe', 'funghio']],
+    ['camarões', 'pt', ['camarão', 'camarõ', 'camarõe']],
+    ['tomates', 'pt-BR', ['tomat', 'tomate']],
+    ['cebollas', 'es', ['cebolla']],
+    ['berries', 'en', ['berry', 'berri', 'berrie']],
+    ['tomatoes', 'en', ['tomato', 'tomatoe']], // "-oes" e "-es" dão o mesmo: sem repetir
+  ])('%j (%s) vira %j', (nome, idioma, esperado) => {
+    expect(variacoesSingular(nome, idioma)).toEqual(esperado);
+  });
+
+  it.each([
+    ['mozzarella di bufala', 'it'], // mais de uma palavra
+    ['uva', 'pt'], // palavra curta
+    ['pomodori', 'de'], // idioma sem regras
+    ['pomodori', 'und'],
+    ['pomodoro', 'it'], // já no singular: nenhuma regra casa
+  ])('%j (%s) vira lista vazia', (nome, idioma) => {
+    expect(variacoesSingular(nome, idioma)).toEqual([]);
+  });
+});
 
 describe('idiomaWikipedia', () => {
   it.each([
@@ -76,6 +103,12 @@ describe('limparExtrato', () => {
     const r = limparExtrato('palavra '.repeat(60)); // 480 caracteres, sem ponto
     expect(r.length).toBeLessThanOrEqual(301);
     expect(r.endsWith('palavra…')).toBe(true);
+  });
+
+  it('aceita outro tamanho (ingrediente: 160)', () => {
+    const r = limparExtrato('O tomate é o fruto do tomateiro. '.repeat(10), 160);
+    expect(r.length).toBeLessThanOrEqual(160);
+    expect(r.endsWith('tomateiro.')).toBe(true);
   });
 
   it('texto vazio continua vazio', () => {

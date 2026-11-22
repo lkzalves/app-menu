@@ -50,7 +50,7 @@ export class MenusController {
     return this.menusService.addItem(id, dto);
   }
 
-  // Recebe os retângulos que o cliente circulou, troca a lista de itens e enfileira o OCR de cada um.
+  // Recebe os pratos circulados (cada um com as linhas de ingredientes dele), troca a lista de itens e enfileira o OCR de cada um.
   // 202: os nomes chegam depois (acompanhe por GET /menus/:id/eventos)
   @Post(':id/pratos')
   @HttpCode(202)
@@ -58,7 +58,7 @@ export class MenusController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MarcarPratosDto,
   ) {
-    return this.menusService.marcarPratos(id, dto.regioes);
+    return this.menusService.marcarPratos(id, dto.grupos);
   }
 
   // "Não é esse prato": rejeita a foto mostrada e busca outra. 202 = a nova foto chega depois (evento "imagem")

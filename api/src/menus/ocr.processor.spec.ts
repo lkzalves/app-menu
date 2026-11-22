@@ -27,10 +27,12 @@ describe('OcrProcessor', () => {
       count: vi.fn(),
     },
     menu: { updateMany: vi.fn() },
+    menuItemIngrediente: { createMany: vi.fn() },
+    $transaction: vi.fn(),
   };
   const fotos = { getBuffer: vi.fn() };
   const ocr = { reconhecerRegioes: vi.fn() };
-  const catalogo = { obterOuCriar: vi.fn() };
+  const catalogo = { obterOuCriar: vi.fn(), obterOuCriarIngrediente: vi.fn() };
   const filaImagens = { addBulk: vi.fn() };
   const filaDescricoes = { addBulk: vi.fn() };
   const eventos = { publicar: vi.fn() };
@@ -43,6 +45,9 @@ describe('OcrProcessor', () => {
     prisma.menu.updateMany.mockResolvedValue({ count: 1 });
     fotos.getBuffer.mockResolvedValue(Buffer.from('foto'));
     catalogo.obterOuCriar.mockResolvedValue('d1');
+    catalogo.obterOuCriarIngrediente.mockImplementation(async (nome: string) => `ing-${nome}`);
+    // Transação interativa: o "tx" é o próprio mock, então as chamadas dentro dela ficam visíveis
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     processor = new OcrProcessor(
       prisma as never,
       fotos as never,
@@ -91,6 +96,102 @@ describe('OcrProcessor', () => {
       [{ tipo: 'item', menuId: 'm1' }],
       [{ tipo: 'menu', menuId: 'm1' }],
     ]);
+  });
+
+  describe('ingredientes', () => {
+    const comIngredientes = {
+      ...itemProcessando,
+      regioesIngredientes: [
+        { x: 5, y: 50, largura: 300, altura: 20 },
+        { x: 5, y: 75, largura: 300, altura: 20 },
+      ],
+    };
+
+    it('lê prato e linhas num só OCR, grava os ingredientes e enfileira a descrição deles', async () => {
+      prisma.menuItem.findUnique.mockResolvedValue(comIngredientes);
+      ocr.reconhecerRegioes.mockResolvedValue([
+        'MARGHERITA R$40',
+        'Pomodoro, mozzarella',
+        'e basilico (fresco)',
+      ]);
+
+      await processor.process(job());
+
+      expect(ocr.reconhecerRegioes).toHaveBeenCalledTimes(1);
+      expect(ocr.reconhecerRegioes).toHaveBeenCalledWith(expect.any(Buffer), [
+        { x: 1, y: 2, largura: 30, altura: 40 },
+        { x: 5, y: 50, largura: 300, altura: 20 },
+        { x: 5, y: 75, largura: 300, altura: 20 },
+      ]);
+      expect(catalogo.obterOuCriarIngrediente.mock.calls).toEqual([
+        ['Pomodoro', 'it'],
+        ['mozzarella', 'it'],
+        ['basilico', 'it'],
+      ]);
+      expect(prisma.menuItemIngrediente.createMany).toHaveBeenCalledWith({
+        data: [
+          { ordem: 0, nomeOriginal: 'Pomodoro', ingredienteId: 'ing-Pomodoro', menuItemId: 'i1' },
+          { ordem: 1, nomeOriginal: 'mozzarella', ingredienteId: 'ing-mozzarella', menuItemId: 'i1' },
+          { ordem: 2, nomeOriginal: 'basilico', ingredienteId: 'ing-basilico', menuItemId: 'i1' },
+        ],
+      });
+      expect(filaDescricoes.addBulk).toHaveBeenCalledTimes(2); // prato e ingredientes
+      expect(filaDescricoes.addBulk).toHaveBeenLastCalledWith([
+        expect.objectContaining({
+          name: 'ingredientes',
+          data: { itemId: 'i1' },
+          opts: expect.objectContaining({ jobId: 'ingredientes-i1' }),
+        }),
+      ]);
+    });
+
+    it('linhas sem texto aproveitável: o prato fica, sem ingredientes e sem job de descrição', async () => {
+      prisma.menuItem.findUnique.mockResolvedValue(comIngredientes);
+      ocr.reconhecerRegioes.mockResolvedValue(['MARGHERITA', ' | ', '12,50']);
+
+      await processor.process(job());
+
+      expect(prisma.menuItem.updateMany).toHaveBeenCalled();
+      expect(prisma.menuItemIngrediente.createMany).not.toHaveBeenCalled();
+      expect(filaDescricoes.addBulk).toHaveBeenCalledTimes(1); // só a do prato
+    });
+
+    it('prato sem texto: some da lista junto com as linhas de ingredientes', async () => {
+      prisma.menuItem.findUnique.mockResolvedValue(comIngredientes);
+      ocr.reconhecerRegioes.mockResolvedValue([' | ', 'Pomodoro', 'Basilico']);
+
+      await processor.process(job());
+
+      expect(catalogo.obterOuCriarIngrediente).not.toHaveBeenCalled();
+      expect(prisma.menuItemIngrediente.createMany).not.toHaveBeenCalled();
+      expect(prisma.menuItem.deleteMany).toHaveBeenCalled();
+    });
+
+    it('item apagado durante o OCR: não grava ingredientes nem enfileira nada', async () => {
+      prisma.menuItem.findUnique.mockResolvedValue(comIngredientes);
+      ocr.reconhecerRegioes.mockResolvedValue(['PIZZA', 'Pomodoro']);
+      prisma.menuItem.updateMany.mockResolvedValue({ count: 0 });
+
+      await processor.process(job());
+
+      expect(prisma.menuItemIngrediente.createMany).not.toHaveBeenCalled();
+      expect(filaDescricoes.addBulk).not.toHaveBeenCalled();
+    });
+
+    it('regiões inválidas no Json são ignoradas', async () => {
+      prisma.menuItem.findUnique.mockResolvedValue({
+        ...itemProcessando,
+        regioesIngredientes: [{ x: 'a' }, null, 7, { x: 1, y: 2, largura: 3, altura: 4 }],
+      });
+      ocr.reconhecerRegioes.mockResolvedValue(['PIZZA', 'Pomodoro']);
+
+      await processor.process(job());
+
+      expect(ocr.reconhecerRegioes).toHaveBeenCalledWith(expect.any(Buffer), [
+        { x: 1, y: 2, largura: 30, altura: 40 },
+        { x: 1, y: 2, largura: 3, altura: 4 },
+      ]);
+    });
   });
 
   it('menu sem idioma usa "und" no catálogo', async () => {

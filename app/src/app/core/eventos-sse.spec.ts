@@ -35,9 +35,10 @@ describe('abrirEventos', () => {
 
     const origem = EventSourceFalso.ultimo;
     expect(origem.url).toBe('http://api/menus/1/eventos');
-    for (const tipo of ['ready', 'item', 'removido', 'menu', 'imagem', 'descricao']) origem.emitir(tipo);
+    const tipos = ['ready', 'item', 'removido', 'menu', 'imagem', 'descricao', 'ingrediente'];
+    for (const tipo of tipos) origem.emitir(tipo);
 
-    expect(recebidos).toEqual(['ready', 'item', 'removido', 'menu', 'imagem', 'descricao']);
+    expect(recebidos).toEqual(tipos);
   });
 
   it('ignora o ping e emite "erro" quando a conexão cai', () => {

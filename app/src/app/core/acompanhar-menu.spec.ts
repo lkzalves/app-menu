@@ -3,11 +3,12 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
+import { environment } from '../../environments/environment';
 import { EstadoAoVivo, acompanharMenu } from './acompanhar-menu';
 import { TipoEvento } from './eventos-sse';
 import { MenuDetalhe, MenusApiService } from './menus-api.service';
 
-const URL_MENU = 'http://localhost:3000/menus/m1';
+const URL_MENU = `${environment.apiUrl}/menus/m1`;
 const menu = (status: MenuDetalhe['status'] = 'PROCESSANDO'): MenuDetalhe => ({
   id: 'm1',
   idioma: 'it',

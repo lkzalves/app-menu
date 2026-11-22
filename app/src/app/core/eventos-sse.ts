@@ -1,7 +1,7 @@
 import { Observable } from 'rxjs';
 
 // Tipos de evento que a API manda (o "ping" a cada 25 s só mantém a conexão viva e é ignorado)
-export const TIPOS_EVENTO = ['ready', 'item', 'removido', 'menu', 'imagem', 'descricao'] as const;
+export const TIPOS_EVENTO = ['ready', 'item', 'removido', 'menu', 'imagem', 'descricao', 'ingrediente'] as const;
 
 // 'erro' não vem da API: é a conexão que caiu (o EventSource tenta reconectar sozinho,
 // e ao reconectar a API manda 'ready' de novo)

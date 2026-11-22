@@ -24,6 +24,7 @@ const NOME_SEM_IDIOMA = 'PRATO SEM IDIOMA E2E';
 const UUID_INEXISTENTE = '00000000-0000-0000-0000-000000000000';
 const FILAS = ['ocr', 'imagens', 'descricoes'];
 const regiao = (x = 10) => ({ x, y: 20, largura: 100, altura: 30 });
+const grupo = (x = 10) => ({ prato: regiao(x) });
 
 describe('Marcar pratos (e2e)', () => {
   let app: INestApplication<App>;
@@ -39,7 +40,7 @@ describe('Marcar pratos (e2e)', () => {
   const marcar = async (id: string, regioes: ReturnType<typeof regiao>[]) => {
     const res = await request(app.getHttpServer())
       .post(`/menus/${id}/pratos`)
-      .send({ regioes })
+      .send({ grupos: regioes.map((r) => ({ prato: r })) })
       .expect(202);
     expect(res.body).toEqual({ itens: regioes.length });
     await aguardarFila(app, FILAS);
@@ -159,7 +160,7 @@ describe('Marcar pratos (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/menus/${id}/pratos`)
-      .send({ regioes: [regiao()] })
+      .send({ grupos: [grupo()] })
       .expect(202);
     const durante = (
       await request(app.getHttpServer()).get(`/menus/${id}`).expect(200)
@@ -273,28 +274,35 @@ describe('Marcar pratos (e2e)', () => {
     const id = await criarMenu(false);
     await request(app.getHttpServer())
       .post(`/menus/${id}/pratos`)
-      .send({ regioes: [regiao()] })
+      .send({ grupos: [grupo()] })
       .expect(409);
   });
 
   it('menu inexistente responde 404', () =>
     request(app.getHttpServer())
       .post(`/menus/${UUID_INEXISTENTE}/pratos`)
-      .send({ regioes: [regiao()] })
+      .send({ grupos: [grupo()] })
       .expect(404));
 
   it.each([
-    ['lista vazia', { regioes: [] }],
-    ['sem o campo regioes', {}],
+    ['lista vazia', { grupos: [] }],
+    ['sem o campo grupos', {}],
+    ['formato antigo (regioes)', { regioes: [regiao()] }],
+    ['grupo sem prato', { grupos: [{}] }],
+    ['prato que não é objeto', { grupos: [{ prato: 'x' }] }],
+    ['ingredientes que não é lista', { grupos: [{ ...grupo(), ingredientes: 'x' }] }],
+    ['mais de 30 grupos', { grupos: Array.from({ length: 31 }, () => grupo()) }],
+    ['largura zero', { grupos: [{ prato: { ...regiao(), largura: 0 } }] }],
+    ['x negativo', { grupos: [{ prato: { ...regiao(), x: -1 } }] }],
+    ['x decimal', { grupos: [{ prato: { ...regiao(), x: 1.5 } }] }],
+    ['campo extra na região', { grupos: [{ prato: { ...regiao(), foo: 1 } }] }],
+    ['campo extra no grupo', { grupos: [{ ...grupo(), foo: 1 }] }],
     [
-      'mais de 30 regiões',
-      { regioes: Array.from({ length: 31 }, () => regiao()) },
+      'mais de 5 regiões de ingredientes',
+      { grupos: [{ ...grupo(), ingredientes: Array.from({ length: 6 }, () => regiao()) }] },
     ],
-    ['largura zero', { regioes: [{ ...regiao(), largura: 0 }] }],
-    ['x negativo', { regioes: [{ ...regiao(), x: -1 }] }],
-    ['x decimal', { regioes: [{ ...regiao(), x: 1.5 }] }],
-    ['campo extra na região', { regioes: [{ ...regiao(), foo: 1 }] }],
-  ])('região inválida (%s) responde 400', async (_nome, corpo) => {
+    ['ingrediente inválido', { grupos: [{ ...grupo(), ingredientes: [{ ...regiao(), altura: 0 }] }] }],
+  ])('corpo inválido (%s) responde 400', async (_nome, corpo) => {
     const id = await criarMenu();
     await request(app.getHttpServer())
       .post(`/menus/${id}/pratos`)

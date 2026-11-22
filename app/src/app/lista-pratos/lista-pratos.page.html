@@ -84,6 +84,32 @@
             </div>
           }
         </div>
+
+        <!-- Ingredientes que o cliente circulou, um por linha; a descrição chega depois (evento "ingrediente") -->
+        @if (item.ingredientes.length > 0) {
+          <section class="ingredientes">
+            <h3>Ingredientes</h3>
+            <ul>
+              @for (ing of item.ingredientes; track ing.id) {
+                <li>
+                  <strong>{{ ing.nomeOriginal }}</strong>
+                  @if (nomeEmPortugues(ing); as pt) {
+                    <span class="pt">({{ pt }})</span>
+                  }
+                  @if (ing.ingrediente?.descricao; as descricao) {
+                    <span>: {{ descricao }}</span>
+                    @if (ing.ingrediente.descricaoUrl; as url) {
+                      <a class="fonte" [href]="url" target="_blank" rel="noopener noreferrer">Wikipédia</a>
+                    }
+                  }
+                </li>
+              }
+            </ul>
+            @if (temDescricaoDeIngrediente(item)) {
+              <p class="credito">Descrições dos ingredientes: Wikipédia · CC BY-SA 4.0</p>
+            }
+          </section>
+        }
       </article>
     }
   }

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { separarIngredientes } from '../menus/ingredientes.util.js';
 import { limparNomePrato } from '../menus/nome-prato.util.js';
 import { TesseractOcrProvider } from './tesseract-ocr.provider.js';
 
@@ -23,5 +24,22 @@ describe.skipIf(!existsSync(foto))('TesseractOcrProvider.reconhecerRegioes (OCR 
     console.log(lidos.map((l, i) => `${regioes[i].nome} => ${l}`).join('\n'));
     // OCR não é exato: exige a maioria certa, não todos
     expect(acertos.length).toBeGreaterThanOrEqual(Math.ceil(regioes.length * 0.8));
+  }, 120_000);
+
+  it('lê e separa os ingredientes das linhas circuladas', async () => {
+    const blocos: { prato: string; x: number; y: number; largura: number; altura: number; esperados: string[] }[] =
+      JSON.parse(readFileSync(new URL('comida.ingredientes.json', pasta), 'utf8'));
+    const textos = await new TesseractOcrProvider().reconhecerRegioes(readFileSync(foto), blocos);
+
+    let esperados = 0;
+    let achados = 0;
+    blocos.forEach((bloco, i) => {
+      const lidos = separarIngredientes(textos[i]).map(normalizar);
+      console.log(`${bloco.prato} => ${separarIngredientes(textos[i]).join(' | ')}`);
+      esperados += bloco.esperados.length;
+      achados += bloco.esperados.filter((e) => lidos.includes(normalizar(e))).length;
+    });
+    // Texto pequeno e corrido: exige a maioria dos ingredientes esperados, não todos
+    expect(achados).toBeGreaterThanOrEqual(Math.ceil(esperados * 0.7));
   }, 120_000);
 });

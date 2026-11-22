@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { environment } from '../../environments/environment';
-import { Regiao } from './regiao';
+import { GrupoPrato } from './regiao';
 
 // Só o que o app usa da resposta de POST /menus e POST /menus/:id/foto
 export interface MenuCriado {
@@ -30,6 +30,18 @@ export interface PratoDoCatalogo {
   imagens: ImagemDoPrato[];
 }
 
+// Um ingrediente do item, como o cardápio o escreveu, e o que o catálogo sabe dele (chega depois do nome)
+export interface IngredienteDoItem {
+  id: string;
+  ordem: number;
+  nomeOriginal: string;
+  ingrediente: {
+    nomePt: string | null; // título do artigo em português ("Tomate")
+    descricao: string | null; // só existe quando há artigo na Wikipédia
+    descricaoUrl: string | null;
+  } | null;
+}
+
 export interface ItemDoMenu {
   id: string;
   ordem: number;
@@ -37,6 +49,7 @@ export interface ItemDoMenu {
   nomeOriginal: string;
   dishId: string | null;
   dish: PratoDoCatalogo | null;
+  ingredientes: IngredienteDoItem[];
 }
 
 export interface MenuDetalhe {
@@ -78,9 +91,9 @@ export class MenusApiService {
     });
   }
 
-  // 202: o OCR de cada recorte roda depois (os nomes chegam pelos eventos)
-  marcarPratos(menuId: string, regioes: Regiao[]) {
-    return this.http.post<{ itens: number }>(`${this.base}/menus/${menuId}/pratos`, { regioes });
+  // 202: o OCR de cada prato (e das linhas de ingredientes dele) roda depois; os nomes chegam pelos eventos
+  marcarPratos(menuId: string, grupos: GrupoPrato[]) {
+    return this.http.post<{ itens: number }>(`${this.base}/menus/${menuId}/pratos`, { grupos });
   }
 
   criarMenu(idioma: string) {

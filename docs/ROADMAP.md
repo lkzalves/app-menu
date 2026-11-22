@@ -38,5 +38,8 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
   - Baixa a imagem para o storage; nunca usa a URL da Pixabay (hotlink proibido); respeita o cache de 24 h e o limite de 100 req/60 s; guarda fonte e crédito
 - [x] 7. Fila + worker: OCR dos recortes e busca de foto assíncronos; SSE mandando cada prato assim que fica pronto
 - [ ] 8. App Ionic: câmera → cliente escolhe o idioma do cardápio (grava em Menu.idioma) → circular os nomes dos pratos → lista progressiva (foto ilustrativa + nome original) → "não é esse prato" (troca a foto e alimenta o catálogo)
+  - Ingredientes (segundo caminho de informação quando a Pixabay não tem o prato): o cliente circula o prato (amarelo) e, em seguida, as linhas de ingredientes (vermelho); o vínculo é pela ordem (o vermelho vai para o último prato circulado, até 5 linhas por prato). `POST /pratos` recebe `grupos: [{ prato, ingredientes? }]`
+  - O mesmo job de OCR lê o prato e as linhas; `separarIngredientes` quebra o texto. Catálogo compartilhado `Ingrediente`/`IngredienteNome` (busca por nome normalizado exato); a lista de cada prato é `MenuItemIngrediente`
+  - Descrição: Wikipédia em lote (1 job `ingredientes` por prato, na fila `descricoes`, em ~2 consultas), com singular (pomodori → pomodoro) e, se não achar no idioma do cardápio, título direto na wiki pt. Evento SSE `ingrediente`. Fotos e "não é esse prato" continuam como antes
 - [ ] 9. Produção: usuário anônimo por dispositivo, limite de uso por dispositivo, deploy, Sentry
 - [ ] 10. Extras: compartilhar resultado, histórico, filtros (vegetariano, alergênicos), sugestão automática dos títulos (caixas de linha do OCR) para o cliente só confirmar

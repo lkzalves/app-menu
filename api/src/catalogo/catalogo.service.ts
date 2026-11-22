@@ -65,4 +65,29 @@ export class CatalogoService {
       throw e;
     }
   }
+
+  // Mesma ideia para ingredientes, mas só por nome normalizado EXATO (sem similaridade: nomes curtos
+  // e parecidos, como "pepe" e "pere", são ingredientes diferentes). Devolve o id do Ingrediente
+  async obterOuCriarIngrediente(nome: string, idioma: string): Promise<string> {
+    const normalizado = normalizarNome(nome);
+    if (!normalizado) throw new Error('Nome do ingrediente sem letras ou números');
+
+    const chave = { idioma_nomeNormalizado: { idioma, nomeNormalizado: normalizado } };
+    const existente = await this.prisma.ingredienteNome.findUnique({ where: chave });
+    if (existente) return existente.ingredienteId;
+
+    try {
+      const ingrediente = await this.prisma.ingrediente.create({
+        data: { nomes: { create: { nome, nomeNormalizado: normalizado, idioma } } },
+      });
+      return ingrediente.id;
+    } catch (e) {
+      // P2002: outro job criou o mesmo nome agora há pouco
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const criado = await this.prisma.ingredienteNome.findUnique({ where: chave });
+        if (criado) return criado.ingredienteId;
+      }
+      throw e;
+    }
+  }
 }
