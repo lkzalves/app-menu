@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
 
 @Injectable()
@@ -22,5 +24,17 @@ export class MenusService {
     });
     if (!menu) throw new NotFoundException('Menu não encontrado'); // vira HTTP 404
     return menu;
+  }
+
+  async addItem(menuId: string, dto: CreateMenuItemDto) {
+    try {
+      return await this.prisma.menuItem.create({ data: { ...dto, menuId } });
+    } catch (e) {
+      // P2003 = chave estrangeira inválida: o menu não existe
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2003') {
+        throw new NotFoundException('Menu não encontrado');
+      }
+      throw e;
+    }
   }
 }
