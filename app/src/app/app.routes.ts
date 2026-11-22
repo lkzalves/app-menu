@@ -9,5 +9,9 @@ export const routes: Routes = [
     path: 'menus/:id/marcar',
     loadComponent: () => import('./marcar-pratos/marcar-pratos.page').then((m) => m.MarcarPratosPage),
   },
+  {
+    path: 'menus/:id',
+    loadComponent: () => import('./lista-pratos/lista-pratos.page').then((m) => m.ListaPratosPage),
+  },
   { path: '', redirectTo: 'novo-menu', pathMatch: 'full' },
 ];

@@ -10,6 +10,42 @@ export interface MenuCriado {
   fotoKey: string | null;
 }
 
+// --- GET /menus/:id: só os campos que o app usa ---
+
+export type StatusMenu = 'RECEBIDO' | 'PROCESSANDO' | 'CONCLUIDO' | 'ERRO';
+export type StatusItem = 'PROCESSANDO' | 'PRONTO'; // PROCESSANDO = esqueleto, nomeOriginal vazio
+export type FonteImagem = 'PIXABAY' | 'WIKIMEDIA' | 'BRAVE';
+
+export interface ImagemDoPrato {
+  id: string; // a foto sai de GET /imagens/:id
+  fonte: FonteImagem;
+  paginaOrigem: string | null;
+  credito: string | null;
+  licenca: string | null;
+}
+
+export interface PratoDoCatalogo {
+  descricao: string | null; // só existe quando há artigo em português na Wikipédia
+  descricaoUrl: string | null;
+  imagens: ImagemDoPrato[];
+}
+
+export interface ItemDoMenu {
+  id: string;
+  ordem: number;
+  status: StatusItem;
+  nomeOriginal: string;
+  dishId: string | null;
+  dish: PratoDoCatalogo | null;
+}
+
+export interface MenuDetalhe {
+  id: string;
+  idioma: string | null;
+  status: StatusMenu;
+  itens: ItemDoMenu[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class MenusApiService {
   private readonly http = inject(HttpClient);
@@ -20,7 +56,21 @@ export class MenusApiService {
     return `${this.base}/menus/${menuId}/foto`;
   }
 
-  // 202: o OCR de cada recorte roda depois (os nomes chegam pelos eventos, no 8.4)
+  // Foto ilustrativa de um prato (id do DishImage), para usar direto no <img src>
+  urlDaImagem(imagemId: string) {
+    return `${this.base}/imagens/${imagemId}`;
+  }
+
+  // Stream SSE do menu (EventSource)
+  urlDosEventos(menuId: string) {
+    return `${this.base}/menus/${menuId}/eventos`;
+  }
+
+  obterMenu(menuId: string) {
+    return this.http.get<MenuDetalhe>(`${this.base}/menus/${menuId}`);
+  }
+
+  // 202: o OCR de cada recorte roda depois (os nomes chegam pelos eventos)
   marcarPratos(menuId: string, regioes: Regiao[]) {
     return this.http.post<{ itens: number }>(`${this.base}/menus/${menuId}/pratos`, { regioes });
   }

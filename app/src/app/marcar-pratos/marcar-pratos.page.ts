@@ -16,7 +16,7 @@ import {
   ToastController,
 } from '@ionic/angular';
 import { addIcons } from 'ionicons';
-import { add, arrowUndo, checkmarkCircle, remove } from 'ionicons/icons';
+import { add, arrowUndo, remove } from 'ionicons/icons';
 import { MenusApiService } from '../core/menus-api.service';
 import { Ponto, Regiao, Tamanho, telaParaFoto, tracoParaRegiao } from '../core/regiao';
 
@@ -65,11 +65,10 @@ export class MarcarPratosPage {
   readonly modo = signal<Modo>('marcar');
   readonly zoom = signal(1);
   readonly enviando = signal(false);
-  readonly enviado = signal(false);
 
   constructor() {
     // No Ionic standalone cada ícone precisa ser registrado, senão o <ion-icon> aparece vazio
-    addIcons({ add, remove, arrowUndo, checkmarkCircle });
+    addIcons({ add, remove, arrowUndo });
   }
 
   aoCarregar(evento: Event) {
@@ -144,7 +143,8 @@ export class MarcarPratosPage {
     this.enviando.set(true);
     try {
       await firstValueFrom(this.api.marcarPratos(this.menuId, regioes));
-      this.enviado.set(true);
+      // Os itens já existem (PROCESSANDO); a lista abre o SSE e mostra os pratos conforme ficam prontos
+      await this.router.navigate(['/menus', this.menuId]);
     } catch {
       // As regiões continuam na tela para tentar de novo
       await this.avisar('Não foi possível enviar. Confira a conexão e tente de novo.');

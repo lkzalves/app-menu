@@ -1,0 +1,78 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button [defaultHref]="'/menus/' + menuId + '/marcar'" text="Marcar"></ion-back-button>
+    </ion-buttons>
+    <ion-title>Pratos</ion-title>
+  </ion-toolbar>
+  @if (lendo()) {
+    <ion-progress-bar type="indeterminate"></ion-progress-bar>
+  }
+</ion-header>
+
+<ion-content>
+  @if (estado().semConexao) {
+    <div class="aviso">Sem conexão. Tentando de novo…</div>
+  }
+
+  @if (vazio()) {
+    <div class="vazio">
+      <h2>Nenhum prato reconhecido</h2>
+      <p>Volte e passe o dedo sobre o nome de cada prato.</p>
+      <ion-button fill="outline" [routerLink]="['/menus', menuId, 'marcar']">Marcar de novo</ion-button>
+    </div>
+  }
+
+  @for (item of itens(); track item.id) {
+    @if (item.status === 'PROCESSANDO') {
+      <!-- Recorte ainda sendo lido: o nome (e a foto) chegam por eventos -->
+      <article class="prato">
+        <ion-skeleton-text class="foto" [animated]="true"></ion-skeleton-text>
+        <div class="texto">
+          <ion-skeleton-text [animated]="true" style="width: 60%"></ion-skeleton-text>
+          <ion-skeleton-text [animated]="true" style="width: 40%"></ion-skeleton-text>
+        </div>
+      </article>
+    } @else {
+      <article class="prato">
+        <div class="foto">
+          @if (foto(item); as f) {
+            <img [src]="urlDaImagem(f.id)" [alt]="'Imagem ilustrativa: ' + item.nomeOriginal" loading="lazy" />
+            <span class="selo">Imagem ilustrativa</span>
+          } @else {
+            <ion-icon name="restaurant-outline"></ion-icon>
+          }
+        </div>
+
+        <div class="texto">
+          <h2>{{ item.nomeOriginal }}</h2>
+
+          @if (item.dish?.descricao; as descricao) {
+            <p class="descricao">{{ descricao }}</p>
+            <p class="credito">
+              Fonte:
+              @if (item.dish.descricaoUrl; as url) {
+                <a [href]="url" target="_blank" rel="noopener noreferrer">Wikipédia</a>
+              } @else {
+                Wikipédia
+              }
+              · CC BY-SA 4.0
+            </p>
+          }
+
+          @if (foto(item); as f) {
+            <p class="credito">
+              Foto:
+              @if (f.paginaOrigem) {
+                <a [href]="f.paginaOrigem" target="_blank" rel="noopener noreferrer">{{ f.credito ?? nomeDaFonte(f.fonte) }}</a>
+              } @else {
+                {{ f.credito ?? nomeDaFonte(f.fonte) }}
+              }
+              · {{ nomeDaFonte(f.fonte) }}
+            </p>
+          }
+        </div>
+      </article>
+    }
+  }
+</ion-content>

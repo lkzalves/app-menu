@@ -23,13 +23,7 @@
 </ion-header>
 
 <ion-content [scrollY]="false">
-  @if (enviado()) {
-    <div class="enviado">
-      <ion-icon name="checkmark-circle" color="success"></ion-icon>
-      <h2>{{ regioes().length }} {{ regioes().length === 1 ? 'prato enviado' : 'pratos enviados' }}</h2>
-      <ion-button fill="outline" (click)="enviado.set(false)">Marcar de novo</ion-button>
-    </div>
-  } @else if (erroFoto()) {
+  @if (erroFoto()) {
     <div class="enviado">
       <h2>Não foi possível carregar a foto</h2>
       <ion-button fill="outline" (click)="voltar()">Voltar</ion-button>
@@ -84,7 +78,7 @@
   }
 </ion-content>
 
-@if (!enviado() && !erroFoto()) {
+@if (!erroFoto()) {
   <ion-footer>
     <ion-toolbar>
       <ion-buttons slot="start">

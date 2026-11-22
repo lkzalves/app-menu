@@ -37,8 +37,18 @@ describe('MenusApiService', () => {
     req.flush({ itens: 1 });
   });
 
-  it('urlDaFoto: aponta para GET /menus/:id/foto', () => {
+  it('urlDaFoto, urlDaImagem e urlDosEventos montam as URLs da API', () => {
     expect(api.urlDaFoto('abc')).toBe(`${environment.apiUrl}/menus/abc/foto`);
+    expect(api.urlDaImagem('img1')).toBe(`${environment.apiUrl}/imagens/img1`);
+    expect(api.urlDosEventos('abc')).toBe(`${environment.apiUrl}/menus/abc/eventos`);
+  });
+
+  it('obterMenu: GET /menus/:id', () => {
+    api.obterMenu('abc').subscribe((m) => expect(m.status).toBe('CONCLUIDO'));
+
+    const req = http.expectOne(`${environment.apiUrl}/menus/abc`);
+    expect(req.request.method).toBe('GET');
+    req.flush({ id: 'abc', idioma: 'it', status: 'CONCLUIDO', itens: [] });
   });
 
   it('enviarFoto: POST multipart em /menus/:id/foto, no campo "foto"', () => {
