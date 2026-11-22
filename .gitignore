@@ -64,3 +64,5 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 CLAUDE.md
 agents.md
 ROADMAP.md
+# Cache dos idiomas do Tesseract
+/api/.tessdata
