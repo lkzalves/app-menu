@@ -1,6 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDisk, StorageDisk } from '@nestjs/storage';
+import { CatalogoService } from '../catalogo/catalogo.service.js';
 import { Prisma } from '../generated/prisma/client.js';
+import { DescricoesService } from '../descricoes/descricoes.service.js';
+import { ImagensService } from '../imagens/imagens.service.js';
 import { OcrProvider } from '../ocr/ocr.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
@@ -15,6 +18,9 @@ export class MenusService {
     private readonly prisma: PrismaService,
     @InjectDisk('fotos') private readonly fotos: StorageDisk,
     private readonly ocr: OcrProvider,
+    private readonly catalogo: CatalogoService,
+    private readonly imagens: ImagensService,
+    private readonly descricoes: DescricoesService,
   ) {}
 
   create(dto: CreateMenuDto) {
@@ -28,10 +34,64 @@ export class MenusService {
   async findOne(id: string) {
     const menu = await this.prisma.menu.findUnique({
       where: { id },
-      include: { itens: { orderBy: { ordem: 'asc' } } },
+      include: {
+        itens: {
+          orderBy: { ordem: 'asc' },
+          // Fotos ativas do prato, só com o que o app precisa (o arquivo sai por GET /imagens/:id)
+          include: {
+            dish: {
+              select: {
+                descricao: true,
+                descricaoUrl: true, // crédito: "Fonte: Wikipédia" com este link
+                imagens: {
+                  where: { ativa: true },
+                  orderBy: { criadoEm: 'asc' },
+                  select: { id: true, fonte: true, paginaOrigem: true, credito: true, licenca: true },
+                },
+              },
+            },
+          },
+        },
+      },
     });
     if (!menu) throw new NotFoundException('Menu não encontrado'); // vira HTTP 404
     return menu;
+  }
+
+  // Busca a foto de cada prato do menu. Em sequência e idempotente: se uma fonte der 429 no meio,
+  // o que já foi gravado fica e uma nova chamada continua de onde parou
+  async buscarImagens(id: string) {
+    const { idioma, pratos } = await this.pratosDoMenu(id);
+    for (const p of pratos) await this.imagens.garantirImagem(p.dishId, p.nome, idioma);
+    return this.findOne(id);
+  }
+
+  // Mesma ideia para a descrição (Wikipedia). Também em sequência e idempotente
+  async buscarDescricoes(id: string) {
+    const { idioma, pratos } = await this.pratosDoMenu(id);
+    for (const p of pratos) await this.descricoes.garantirDescricao(p.dishId, p.nome, idioma);
+    return this.findOne(id);
+  }
+
+  // Pratos distintos do menu (dois itens do mesmo prato compartilham foto e descrição) e o idioma
+  private async pratosDoMenu(id: string) {
+    const menu = await this.prisma.menu.findUnique({
+      where: { id },
+      select: {
+        idioma: true,
+        itens: { orderBy: { ordem: 'asc' }, select: { dishId: true, nomeOriginal: true } },
+      },
+    });
+    if (!menu) throw new NotFoundException('Menu não encontrado');
+
+    const vistos = new Set<string>();
+    const pratos: { dishId: string; nome: string }[] = [];
+    for (const item of menu.itens) {
+      if (!item.dishId || vistos.has(item.dishId)) continue;
+      vistos.add(item.dishId);
+      pratos.push({ dishId: item.dishId, nome: item.nomeOriginal });
+    }
+    return { idioma: menu.idioma ?? 'und', pratos };
   }
 
   // O arquivo já foi gravado pelo interceptor antes de chegar aqui
@@ -78,7 +138,7 @@ export class MenusService {
   async marcarPratos(id: string, regioes: RegiaoDto[]) {
     const menu = await this.prisma.menu.findUnique({
       where: { id },
-      select: { fotoKey: true },
+      select: { fotoKey: true, idioma: true },
     });
     if (!menu) throw new NotFoundException('Menu não encontrado');
     if (!menu.fotoKey) throw new ConflictException('Menu sem foto: envie a foto antes de marcar os pratos');
@@ -87,18 +147,26 @@ export class MenusService {
     const textos = await this.ocr.reconhecerRegioes(imagem, regioes);
 
     // Recorte que não virou texto é descartado; ordem segue a lista que o app mandou
-    const itens = regioes
-      .map((r, i) => ({ r, nome: limparNomePrato(textos[i] ?? '') }))
-      .filter((p) => p.nome)
-      .map(({ r, nome }, ordem) => ({
+    const lidos = regioes
+      .map((r, i) => ({ r, nome: limparNomePrato(textos[i] ?? '').slice(0, 200) })) // 200 = limite do DTO de item
+      .filter((p) => p.nome);
+
+    // "und" = idioma indeterminado (o seletor do cliente só chega no app). Em sequência, para dois
+    // nomes parecidos do mesmo cardápio não criarem dois pratos ao mesmo tempo
+    const idioma = menu.idioma ?? 'und';
+    const itens: Prisma.MenuItemCreateManyInput[] = [];
+    for (const [ordem, { r, nome }] of lidos.entries()) {
+      itens.push({
         menuId: id,
         ordem,
-        nomeOriginal: nome.slice(0, 200), // mesmo limite do DTO de item
+        nomeOriginal: nome,
+        dishId: await this.catalogo.obterOuCriar(nome, idioma), // acha o prato no catálogo ou cria
         regiaoX: r.x,
         regiaoY: r.y,
         regiaoLargura: r.largura,
         regiaoAltura: r.altura,
-      }));
+      });
+    }
 
     // Transação: ou troca tudo ou não troca nada. O app manda sempre a lista completa
     await this.prisma.$transaction([

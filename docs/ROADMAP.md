@@ -9,7 +9,7 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
 
 - Rápido: primeiros pratos na tela em poucos segundos, o resto chega aos poucos.
 - Pouco esforço: o cliente só circula os nomes dos pratos que quer ver; não digita nem revisa texto. Só um botão "não é esse prato".
-- Multi-idioma: detectar o idioma, mostrar o nome original + tradução.
+- Multi-idioma: o cliente informa o idioma do cardápio; o app mostra o nome original do prato, sem tradução.
 - Toda foto rotulada como "imagem ilustrativa".
 - Cache compartilhado: prato resolvido uma vez serve para todos.
 
@@ -21,8 +21,7 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
 - Fila: BullMQ + Redis
 - Arquivos: disco local no dev, Cloudflare R2/S3 depois
 - OCR: Google Cloud Vision (detecta o idioma sozinho); Tesseract.js só como alternativa no dev
-- Tradução: DeepL ou Google Translation, atrás de uma interface
-- Pratos/fotos: catálogo próprio → Wikidata/Wikipedia → Pexels/Unsplash → Brave
+- Pratos/fotos: catálogo próprio → Wikidata/Wikipedia → Pixabay → Brave
 
 ## Etapas
 
@@ -30,11 +29,13 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
 - [x] 1. API base: Prisma 7, models Menu e MenuItem, CRUD com validação
 - [x] 2. Upload da foto (disco local) ligado a um Menu
 - [x] 3. OCR atrás de OcrProvider: Tesseract.js agora; Google Vision depois, se a qualidade pedir
-- [ ] 4. Pratos marcados: o cliente circula os nomes na foto, o app envia os retângulos e a API faz o OCR de cada recorte (nome do prato), com testes usando cardápios reais
-- [ ] 5. Tradução atrás de TranslationProvider: nome em pt (para exibir) e em en (para buscar foto)
-- [ ] 6. Catálogo de pratos: Dish + DishName (nome por idioma) + DishImage (fonte, licença, crédito, votos), busca aproximada com pg_trgm + unaccent
-- [ ] 7. Busca de foto e descrição: cadeia de ImageProvider (catálogo → Wikidata → Pexels → Brave), gravando no catálogo
-- [ ] 8. Fila + worker: OCR dos recortes, tradução e busca assíncronos; SSE mandando cada prato assim que fica pronto
-- [ ] 9. App Ionic: câmera → circular os nomes dos pratos → lista progressiva (foto ilustrativa + nome original + tradução) → "não é esse prato" (troca a foto e alimenta o catálogo)
-- [ ] 10. Produção: usuário anônimo por dispositivo, limite de uso por dispositivo, deploy, Sentry
-- [ ] 11. Extras: compartilhar resultado, histórico, filtros (vegetariano, alergênicos), sugestão automática dos títulos (caixas de linha do OCR) para o cliente só confirmar
+- [x] 4. Pratos marcados: o cliente circula os nomes na foto, o app envia os retângulos e a API faz o OCR de cada recorte (nome do prato), com testes usando cardápios reais
+- [x] 5. Catálogo de pratos: Dish + DishName (nome por idioma) + DishImage (fonte, licença, crédito, votos), busca aproximada com pg_trgm (nome normalizado no Node: minúsculas, sem acento, sem artigo; o unaccent do Postgres não é IMMUTABLE e não entra em índice)
+- [ ] 6. Busca de foto e descrição: cadeia de ImageProvider (catálogo → Wikidata → Pixabay → Brave), gravando no catálogo
+  - Pixabay: `lang` = idioma do cardápio (`en` se não estiver entre os 26 aceitos), `image_type=photo`, `category=food`, `safesearch=true`; tira o artigo do início do nome
+  - Só aceita o resultado se alguma tag contiver uma palavra do nome do prato; senão cai para a próxima fonte (a Pixabay não dá nota de relevância e erra pratos autorais)
+  - Baixa a imagem para o storage; nunca usa a URL da Pixabay (hotlink proibido); respeita o cache de 24 h e o limite de 100 req/60 s; guarda fonte e crédito
+- [ ] 7. Fila + worker: OCR dos recortes e busca de foto assíncronos; SSE mandando cada prato assim que fica pronto
+- [ ] 8. App Ionic: câmera → cliente escolhe o idioma do cardápio (grava em Menu.idioma) → circular os nomes dos pratos → lista progressiva (foto ilustrativa + nome original) → "não é esse prato" (troca a foto e alimenta o catálogo)
+- [ ] 9. Produção: usuário anônimo por dispositivo, limite de uso por dispositivo, deploy, Sentry
+- [ ] 10. Extras: compartilhar resultado, histórico, filtros (vegetariano, alergênicos), sugestão automática dos títulos (caixas de linha do OCR) para o cliente só confirmar

@@ -11,7 +11,7 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
   'base64',
 );
-const MARCADOR = '__e2e__';
+const MARCADOR = '__e2e_foto__'; // único por arquivo: os e2e rodam em paralelo no mesmo banco
 const UUID_INEXISTENTE = '00000000-0000-0000-0000-000000000000';
 
 describe('Foto do menu (e2e)', () => {

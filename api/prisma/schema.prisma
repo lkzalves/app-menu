@@ -1,8 +1,8 @@
 generator client {
-  provider            = "prisma-client"           // gerador novo do Prisma 7
+  provider            = "prisma-client" // gerador novo do Prisma 7
   output              = "../src/generated/prisma" // obrigatório no Prisma 7
   moduleFormat        = "esm"
-  importFileExtension = "js"                      // casa com module: nodenext
+  importFileExtension = "js" // casa com module: nodenext
 }
 
 datasource db {
@@ -21,8 +21,8 @@ model Menu {
   restaurante String?
   idioma      String?
   status      StatusMenu @default(RECEBIDO)
-  fotoKey     String?    // chave do arquivo no storage (não o caminho)
-  textoOcr    String?    // texto bruto do OCR; o parser (passo 4) lê daqui
+  fotoKey     String? // chave do arquivo no storage (não o caminho)
+  textoOcr    String? // texto bruto do OCR; o parser (passo 4) lê daqui
   criadoEm    DateTime   @default(now()) @db.Timestamptz(3)
   itens       MenuItem[]
 }
@@ -41,6 +41,63 @@ model MenuItem {
   regiaoY       Int?
   regiaoLargura Int?
   regiaoAltura  Int?
+  // Prato canônico do catálogo; SetNull: apagar o prato não apaga o item do cardápio
+  dishId        String?
+  dish          Dish?    @relation(fields: [dishId], references: [id], onDelete: SetNull)
 
   @@index([menuId]) // Postgres não cria índice em FK sozinho
+  @@index([dishId])
+}
+
+enum FonteImagem {
+  PIXABAY
+  WIKIMEDIA
+  BRAVE
+}
+
+// Prato canônico: o mesmo prato lido em cardápios diferentes (ou com erro de OCR) cai aqui
+model Dish {
+  id                 String      @id @default(uuid())
+  criadoEm           DateTime    @default(now()) @db.Timestamptz(3)
+  // Descrição curta em português (Wikipedia, CC BY-SA 4.0: o app mostra "Fonte: Wikipédia" com o link)
+  descricao          String?
+  descricaoUrl       String? // artigo de onde veio o texto, para o crédito
+  descricaoBuscadaEm DateTime?   @db.Timestamptz(3) // quando tentamos; evita repetir a busca de quem não tem artigo
+  nomes              DishName[]
+  imagens            DishImage[]
+  itens              MenuItem[]
+}
+
+// Nome do prato num idioma. nomeNormalizado (minúsculas, sem acento, sem artigo) é calculado no Node
+model DishName {
+  id              String @id @default(uuid())
+  dishId          String
+  dish            Dish   @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  nome            String // como o OCR leu
+  nomeNormalizado String
+  idioma          String // ex.: it, pt; "und" quando o menu não tem idioma
+
+  @@unique([idioma, nomeNormalizado])
+  @@index([dishId])
+  // Índice trigram para a busca aproximada (precisa da extensão pg_trgm, criada na migration)
+  @@index([nomeNormalizado(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+// Foto ilustrativa do prato. O arquivo fica no nosso storage; nunca usamos a URL da fonte (hotlink)
+model DishImage {
+  id             String      @id @default(uuid())
+  dishId         String
+  dish           Dish        @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  fonte          FonteImagem
+  urlOrigem      String // de onde baixamos (só registro)
+  paginaOrigem   String? // página da imagem na fonte, para o crédito
+  storageKey     String // chave do arquivo no storage
+  credito        String? // autor
+  licenca        String?
+  votosPositivos Int         @default(0)
+  votosNegativos Int         @default(0) // alimentado pelo "não é esse prato"
+  ativa          Boolean     @default(true)
+  criadoEm       DateTime    @default(now()) @db.Timestamptz(3)
+
+  @@index([dishId])
 }

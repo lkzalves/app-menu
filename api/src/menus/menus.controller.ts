@@ -56,6 +56,20 @@ export class MenusController {
     return this.menusService.marcarPratos(id, dto.regioes);
   }
 
+  // Busca a foto ilustrativa de cada prato do menu (síncrono por enquanto; a etapa 7 move para a fila)
+  @Post(':id/imagens')
+  @HttpCode(200)
+  buscarImagens(@Param('id', ParseUUIDPipe) id: string) {
+    return this.menusService.buscarImagens(id);
+  }
+
+  // Busca a descrição curta (Wikipedia, em português) de cada prato do menu
+  @Post(':id/descricoes')
+  @HttpCode(200)
+  buscarDescricoes(@Param('id', ParseUUIDPipe) id: string) {
+    return this.menusService.buscarDescricoes(id);
+  }
+
   // Roda o OCR na foto já enviada e guarda o texto bruto em Menu.textoOcr
   @Post(':id/ocr')
   @HttpCode(200) // não cria recurso novo, então 200 em vez do 201 padrão do POST

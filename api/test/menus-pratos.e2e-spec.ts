@@ -12,18 +12,24 @@ const PNG = Buffer.from(
   'base64',
 );
 const MARCADOR = '__e2e_pratos__';
+// Idioma dos menus de teste (máx. 10 caracteres, limite do DTO). Os pratos criados no catálogo levam
+// este idioma e são apagados no fim. O nome do teste sem idioma usa "und" e é apagado pelo nome.
+const IDIOMA = '__e2e_pr__';
+const NOME_SEM_IDIOMA = 'PRATO SEM IDIOMA E2E';
 const UUID_INEXISTENTE = '00000000-0000-0000-0000-000000000000';
 const regiao = (x = 10) => ({ x, y: 20, largura: 100, altura: 30 });
 
 describe('Marcar pratos (e2e)', () => {
   let app: INestApplication<App>;
   let pasta: string;
-  let prisma: { menu: { deleteMany: (a: object) => Promise<unknown> } };
+  let prisma: import('../src/prisma/prisma.service.js').PrismaService;
   // OCR falso: o Tesseract real é lento e baixa idiomas pela rede
   const ocrFalso = { reconhecer: vi.fn(), reconhecerRegioes: vi.fn() };
 
-  const criarMenu = async (comFoto = true) => {
-    const { body } = await request(app.getHttpServer()).post('/menus').send({ restaurante: MARCADOR });
+  const criarMenu = async (comFoto = true, idioma: string | null = IDIOMA) => {
+    const { body } = await request(app.getHttpServer())
+      .post('/menus')
+      .send({ restaurante: MARCADOR, ...(idioma && { idioma }) });
     if (comFoto) {
       await request(app.getHttpServer()).post(`/menus/${body.id}/foto`).attach('foto', PNG, 'c.png');
     }
@@ -48,6 +54,13 @@ describe('Marcar pratos (e2e)', () => {
 
   afterAll(async () => {
     await prisma.menu.deleteMany({ where: { restaurante: MARCADOR } });
+    await prisma.dish.deleteMany({
+      where: {
+        nomes: {
+          some: { OR: [{ idioma: IDIOMA }, { idioma: 'und', nomeNormalizado: 'prato sem idioma e2e' }] },
+        },
+      },
+    });
     await app.close();
     rmSync(pasta, { recursive: true, force: true });
   });
@@ -102,6 +115,49 @@ describe('Marcar pratos (e2e)', () => {
       { ordem: 0, nomeOriginal: 'LASANHA', regiaoX: 1 },
       { ordem: 1, nomeOriginal: 'RISOTO', regiaoX: 3 },
     ]);
+  });
+
+  it('liga cada prato ao catálogo, com o idioma do menu', async () => {
+    ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['IL TARTARE R$47']);
+    const id = await criarMenu();
+
+    const res = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] }).expect(200);
+
+    const nome = await prisma.dishName.findFirstOrThrow({ where: { dishId: res.body.itens[0].dishId } });
+    expect(nome).toMatchObject({ idioma: IDIOMA, nome: 'IL TARTARE', nomeNormalizado: 'tartare' });
+  });
+
+  it('o mesmo prato em dois menus compartilha o dishId, mesmo com erro de OCR', async () => {
+    ocrFalso.reconhecerRegioes.mockResolvedValueOnce(['I GAMBERI R$48']).mockResolvedValueOnce(['IGAMBERI']);
+    const a = await criarMenu();
+    const b = await criarMenu();
+
+    const ra = await request(app.getHttpServer()).post(`/menus/${a}/pratos`).send({ regioes: [regiao()] });
+    const rb = await request(app.getHttpServer()).post(`/menus/${b}/pratos`).send({ regioes: [regiao()] });
+
+    expect(ra.body.itens[0].dishId).toBeTruthy();
+    expect(rb.body.itens[0].dishId).toBe(ra.body.itens[0].dishId);
+  });
+
+  it('reenviar mantém o mesmo prato do catálogo', async () => {
+    ocrFalso.reconhecerRegioes.mockResolvedValue(['PANNA COTTA']);
+    const id = await criarMenu();
+    const um = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] });
+    const dois = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] });
+    ocrFalso.reconhecerRegioes.mockReset();
+
+    expect(dois.body.itens).toHaveLength(1);
+    expect(dois.body.itens[0].dishId).toBe(um.body.itens[0].dishId);
+  });
+
+  it('menu sem idioma usa "und" no catálogo', async () => {
+    ocrFalso.reconhecerRegioes.mockResolvedValueOnce([NOME_SEM_IDIOMA]);
+    const id = await criarMenu(true, null);
+
+    const res = await request(app.getHttpServer()).post(`/menus/${id}/pratos`).send({ regioes: [regiao()] }).expect(200);
+
+    const nome = await prisma.dishName.findFirstOrThrow({ where: { dishId: res.body.itens[0].dishId } });
+    expect(nome.idioma).toBe('und');
   });
 
   it('menu sem foto responde 409', async () => {
