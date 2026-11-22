@@ -132,7 +132,7 @@ describe('Eventos SSE (e2e)', () => {
 
   beforeEach(() => {
     ocrFalso.reconhecerRegioes.mockReset();
-    pixabayFalsa.buscar.mockReset().mockResolvedValue(null);
+    pixabayFalsa.buscar.mockReset().mockResolvedValue([]); // a fonte devolve uma lista (vazia = nada achado)
     wikipediaFalsa.buscar
       .mockReset()
       .mockResolvedValue({

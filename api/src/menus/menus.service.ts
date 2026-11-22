@@ -14,6 +14,7 @@ import {
   OPCOES_JOB_PRATO,
 } from '../fila/fila.constants.js';
 import { EventosService } from '../eventos/eventos.service.js';
+import { FOTOS_POR_PRATO } from '../imagens/imagens.constants.js';
 import { OcrProvider } from '../ocr/ocr.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
@@ -60,6 +61,7 @@ export class MenusService {
                 imagens: {
                   where: { ativa: true },
                   orderBy: { criadoEm: 'asc' },
+                  take: FOTOS_POR_PRATO, // proteção para pratos antigos com mais fotos
                   select: { id: true, fonte: true, paginaOrigem: true, credito: true, licenca: true },
                 },
               },

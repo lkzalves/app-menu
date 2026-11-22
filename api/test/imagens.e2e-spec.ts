@@ -27,6 +27,8 @@ const achada = (urlDownload = URL_FOTO) => ({
   licenca: 'Pixabay Content License',
 });
 
+const urlFoto = (x: string) => `https://cdn.pixabay.com/photo/${x}_640.jpg`;
+
 const respostaImagem = (tipo = 'image/png') =>
   new Response(PNG, { status: 200, headers: { 'content-type': tipo } });
 
@@ -37,6 +39,14 @@ describe('Imagens dos pratos (e2e)', () => {
   // Fonte falsa no lugar da Pixabay: nada de rede nem de chave neste teste
   const pixabayFalsa = { buscar: vi.fn() };
   const fetchMock = vi.fn(); // só o download passa por fetch (o supertest usa http)
+
+  // Fonte falsa com estas candidatas, na ordem. Como a Pixabay de verdade: não repete o que está em
+  // `ignorar` e devolve no máximo `limite`
+  const fonteCom = (...urls: string[]) =>
+    pixabayFalsa.buscar.mockImplementation(
+      async (_nome: string, _idioma: string, { ignorar, limite }: { ignorar: ReadonlySet<string>; limite: number }) =>
+        urls.filter((u) => !ignorar.has(u)).slice(0, limite).map((u) => achada(u)),
+    );
 
   // Menu com um item por nome, cada um ligado a um prato novo do catálogo
   const criarMenu = async (...nomes: string[]) => {
@@ -100,7 +110,7 @@ describe('Imagens dos pratos (e2e)', () => {
 
   it('baixa a foto, grava o DishImage e serve o arquivo em GET /imagens/:id (200)', async () => {
     const { menuId, dishIds } = await criarMenu('Tiramisu');
-    pixabayFalsa.buscar.mockResolvedValue(achada());
+    fonteCom(URL_FOTO);
     fetchMock.mockImplementation(async () => respostaImagem());
 
     const { enfileirado, menu } = await pedirImagens(menuId);
@@ -115,7 +125,7 @@ describe('Imagens dos pratos (e2e)', () => {
       credito: 'fotografo',
       licenca: 'Pixabay Content License',
     });
-    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('Tiramisu', IDIOMA, expect.any(Set));
+    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('Tiramisu', IDIOMA, { ignorar: new Set(), limite: 3 });
     expect(fetchMock).toHaveBeenCalledWith(URL_FOTO);
 
     // Arquivo gravado no storage e servido com os mesmos bytes
@@ -126,11 +136,11 @@ describe('Imagens dos pratos (e2e)', () => {
     expect(foto.body).toEqual(PNG);
   });
 
-  it('é idempotente: dois itens do mesmo prato viram um job e pedir de novo não busca outra vez', async () => {
+  it('é idempotente: dois itens do mesmo prato viram um job e, com 3 fotos, pedir de novo não busca nada', async () => {
     const { menuId, dishIds } = await criarMenu('Lasagna');
     // Segundo item apontando para o mesmo prato
     await prisma.menuItem.create({ data: { menuId, ordem: 1, nomeOriginal: 'Lasagna', dishId: dishIds[0] } });
-    pixabayFalsa.buscar.mockResolvedValue(achada());
+    fonteCom(urlFoto('a'), urlFoto('b'), urlFoto('c'), urlFoto('d'));
     fetchMock.mockImplementation(async () => respostaImagem());
 
     // Dois itens, um prato: um job só
@@ -139,13 +149,79 @@ describe('Imagens dos pratos (e2e)', () => {
     await pedirImagens(menuId);
 
     expect(pixabayFalsa.buscar).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(await prisma.dishImage.count({ where: { dishId: dishIds[0] } })).toBe(3);
+  });
+
+  it('completa até 3 fotos distintas, na ordem da fonte, e entrega as 3 no menu', async () => {
+    const { menuId, dishIds } = await criarMenu('Carbonara');
+    fonteCom(urlFoto('a'), urlFoto('b'), urlFoto('c'), urlFoto('d'), urlFoto('e'));
+    fetchMock.mockImplementation(async () => respostaImagem());
+
+    const { menu } = await pedirImagens(menuId);
+
+    expect(menu.itens[0].dish.imagens).toHaveLength(3);
+    const gravadas = await prisma.dishImage.findMany({ where: { dishId: dishIds[0] }, orderBy: { criadoEm: 'asc' } });
+    expect(gravadas.map((i) => i.urlOrigem)).toEqual([urlFoto('a'), urlFoto('b'), urlFoto('c')]);
+    expect(readdirSync(join(pasta, 'pratos', dishIds[0]))).toHaveLength(3);
+  });
+
+  it('com menos candidatas que o limite, fica só com as que existem', async () => {
+    const { menuId } = await criarMenu('Burrata');
+    fonteCom(urlFoto('a'), urlFoto('b'));
+    fetchMock.mockImplementation(async () => respostaImagem());
+
+    const { menu } = await pedirImagens(menuId);
+    expect(menu.itens[0].dish.imagens).toHaveLength(2);
+  });
+
+  it('prato com 1 foto é completado no próximo pedido, sem repetir a que já tem', async () => {
+    const { menuId, dishIds } = await criarMenu('Arancini');
+    fonteCom(urlFoto('a'));
+    fetchMock.mockImplementation(async () => respostaImagem());
+    await pedirImagens(menuId);
     expect(await prisma.dishImage.count({ where: { dishId: dishIds[0] } })).toBe(1);
+
+    fonteCom(urlFoto('a'), urlFoto('b'), urlFoto('c'), urlFoto('d'));
+    const { menu } = await pedirImagens(menuId);
+
+    expect(menu.itens[0].dish.imagens).toHaveLength(3);
+    // Pediu só as 2 vagas que faltavam e mandou ignorar a que o prato já tem
+    expect(pixabayFalsa.buscar).toHaveBeenLastCalledWith('Arancini', IDIOMA, {
+      ignorar: new Set([urlFoto('a')]),
+      limite: 2,
+    });
+    const gravadas = await prisma.dishImage.findMany({ where: { dishId: dishIds[0] }, orderBy: { criadoEm: 'asc' } });
+    expect(gravadas.map((i) => i.urlOrigem)).toEqual([urlFoto('a'), urlFoto('b'), urlFoto('c')]);
+  });
+
+  it('download que falha não conta como foto: o prato fica só com as que baixaram', async () => {
+    const { menuId } = await criarMenu('Cacio e Pepe');
+    fonteCom(urlFoto('ruim'), urlFoto('a'), urlFoto('b'), urlFoto('c'));
+    fetchMock.mockImplementation(async (url: string) =>
+      url === urlFoto('ruim') ? new Response('', { status: 404 }) : respostaImagem(),
+    );
+
+    // A fonte devolveu 3 (ruim, a, b): a "ruim" falha e o prato fica com 2. A vaga que sobra só é
+    // preenchida num próximo pedido, porque a mesma fonte já foi consultada neste job
+    const { menu } = await pedirImagens(menuId);
+    expect(menu.itens[0].dish.imagens).toHaveLength(2);
+  });
+
+  it('GET /menus/:id entrega no máximo 3 fotos por prato (pratos antigos com mais)', async () => {
+    const { menuId, dishIds } = await criarMenu('Ossobuco');
+    for (const x of ['a', 'b', 'c', 'd']) {
+      await prisma.dishImage.create({
+        data: { dishId: dishIds[0], fonte: 'PIXABAY', urlOrigem: urlFoto(x), storageKey: `falso/${x}.png` },
+      });
+    }
+    const res = await request(app.getHttpServer()).get(`/menus/${menuId}`).expect(200);
+    expect(res.body.itens[0].dish.imagens).toHaveLength(3);
   });
 
   it('prato que nenhuma fonte achou fica sem foto', async () => {
     const { menuId } = await criarMenu('Prato Raro');
-    pixabayFalsa.buscar.mockResolvedValue(null);
+    pixabayFalsa.buscar.mockResolvedValue([]);
 
     const { menu } = await pedirImagens(menuId);
 
@@ -160,7 +236,7 @@ describe('Imagens dos pratos (e2e)', () => {
   ])('ignora a foto quando %s', async (_caso, url, resposta) => {
     // Nome único por caso: DishName tem @@unique([idioma, nomeNormalizado])
     const { menuId, dishIds } = await criarMenu(`Prato Ruim ${_caso}`);
-    pixabayFalsa.buscar.mockResolvedValue(achada(url));
+    pixabayFalsa.buscar.mockResolvedValue([achada(url)]);
     fetchMock.mockImplementation(async () => resposta());
 
     const { menu } = await pedirImagens(menuId);
@@ -172,22 +248,22 @@ describe('Imagens dos pratos (e2e)', () => {
   it('429 da fonte pausa a fila, mantém o que já foi gravado e o job é refeito sozinho', async () => {
     const { menuId } = await criarMenu('Pizza', 'Risotto');
     pixabayFalsa.buscar
-      .mockResolvedValueOnce(achada())
+      .mockResolvedValueOnce([achada()])
       .mockRejectedValueOnce(new LimiteExcedidoError('Pixabay', 200)) // espera curta: o teste não espera 60 s
-      .mockResolvedValue(achada());
+      .mockResolvedValue([achada()]);
     fetchMock.mockImplementation(async () => respostaImagem());
 
     const { menu } = await pedirImagens(menuId);
 
     // Pizza gravada; Risotto tomou 429, esperou e foi refeito
     expect(pixabayFalsa.buscar).toHaveBeenCalledTimes(3);
-    expect(pixabayFalsa.buscar).toHaveBeenLastCalledWith('Risotto', IDIOMA, expect.any(Set));
+    expect(pixabayFalsa.buscar).toHaveBeenLastCalledWith('Risotto', IDIOMA, { ignorar: new Set(), limite: 3 });
     expect(menu.itens.map((i: { dish: { imagens: unknown[] } }) => i.dish.imagens.length)).toEqual([1, 1]);
   });
 
   it('erro de rede na fonte é tentado de novo (backoff) e acaba funcionando', async () => {
     const { menuId } = await criarMenu('Prato Instavel');
-    pixabayFalsa.buscar.mockRejectedValueOnce(new Error('rede caiu')).mockResolvedValue(achada());
+    pixabayFalsa.buscar.mockRejectedValueOnce(new Error('rede caiu')).mockResolvedValue([achada()]);
     fetchMock.mockImplementation(async () => respostaImagem());
 
     const { menu } = await pedirImagens(menuId);
@@ -203,7 +279,7 @@ describe('Imagens dos pratos (e2e)', () => {
 
   it('GET /imagens/:id: 404 se não existe ou está inativa, 400 se não é UUID', async () => {
     const { menuId, dishIds } = await criarMenu('Gnocchi');
-    pixabayFalsa.buscar.mockResolvedValue(achada());
+    fonteCom(URL_FOTO);
     fetchMock.mockImplementation(async () => respostaImagem());
     await pedirImagens(menuId);
     const imagem = await prisma.dishImage.findFirstOrThrow({ where: { dishId: dishIds[0] } });

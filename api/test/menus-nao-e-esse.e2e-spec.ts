@@ -16,8 +16,7 @@ const MARCADOR = '__e2e_nee__';
 const IDIOMA = '__e2e_ne__'; // máx. 10 caracteres (limite do DTO)
 const UUID_INEXISTENTE = '00000000-0000-0000-0000-000000000000';
 const FILAS = ['imagens'];
-const URL_A = 'https://cdn.pixabay.com/photo/a_640.jpg';
-const URL_B = 'https://cdn.pixabay.com/photo/b_640.jpg';
+const urlFoto = (x: string) => `https://cdn.pixabay.com/photo/${x}_640.jpg`;
 
 const achada = (urlDownload: string) => ({
   fonte: 'PIXABAY' as const,
@@ -27,6 +26,11 @@ const achada = (urlDownload: string) => ({
   licenca: 'Pixabay Content License',
 });
 
+interface OpcoesBusca {
+  ignorar: ReadonlySet<string>;
+  limite: number;
+}
+
 describe('Não é esse prato (e2e)', () => {
   let app: INestApplication<App>;
   let pasta: string;
@@ -34,13 +38,13 @@ describe('Não é esse prato (e2e)', () => {
   const pixabayFalsa = { buscar: vi.fn() };
   const fetchMock = vi.fn(); // só o download passa por fetch (o supertest usa http)
 
-  // Fonte falsa que respeita `ignorar`, como a Pixabay de verdade: devolve a primeira foto não rejeitada
+  // Fonte falsa que age como a Pixabay: devolve as candidatas na ordem, sem as de `ignorar`, até `limite`
   const fonteCom = (...urls: string[]) =>
-    pixabayFalsa.buscar.mockImplementation(
-      async (_nome: string, _idioma: string, ignorar?: ReadonlySet<string>) => {
-        const url = urls.find((u) => !ignorar?.has(u));
-        return url ? achada(url) : null;
-      },
+    pixabayFalsa.buscar.mockImplementation(async (_nome: string, _idioma: string, { ignorar, limite }: OpcoesBusca) =>
+      urls
+        .filter((u) => !ignorar.has(u))
+        .slice(0, limite)
+        .map((u) => achada(u)),
     );
 
   const criarMenu = async (nome: string, comPrato = true) => {
@@ -65,6 +69,11 @@ describe('Não é esse prato (e2e)', () => {
     const res = await request(app.getHttpServer()).get(`/menus/${menuId}`).expect(200);
     return res.body.itens[0].dish.imagens as { id: string }[];
   };
+
+  const urlsAtivas = async (dishId: string) =>
+    (await prisma.dishImage.findMany({ where: { dishId, ativa: true }, orderBy: { criadoEm: 'asc' } })).map(
+      (i) => i.urlOrigem,
+    );
 
   const rejeitar = (menuId: string, itemId: string, imagemId: string) =>
     request(app.getHttpServer()).post(`/menus/${menuId}/itens/${itemId}/nao-e-esse`).send({ imagemId });
@@ -108,56 +117,76 @@ describe('Não é esse prato (e2e)', () => {
     rmSync(pasta, { recursive: true, force: true });
   });
 
-  it('rejeita a foto: ela sai do ar e entra outra, nunca a mesma URL', async () => {
+  it('rejeita uma das 3 fotos: só ela sai e a vaga é reposta com a próxima candidata', async () => {
     const { menuId, itemId, dishId } = await criarMenu('Tiramisu');
-    fonteCom(URL_A, URL_B);
+    fonteCom(urlFoto('a'), urlFoto('b'), urlFoto('c'), urlFoto('d'), urlFoto('e'));
     await buscarFotos(menuId);
-    const [antiga] = await fotosDoMenu(menuId);
+    const antes = await fotosDoMenu(menuId);
+    expect(antes).toHaveLength(3);
+    const [rejeitada, ...restantes] = antes;
+    const urlRejeitada = (await prisma.dishImage.findUniqueOrThrow({ where: { id: rejeitada.id } })).urlOrigem;
 
-    const res = await rejeitar(menuId, itemId, antiga.id).expect(202);
+    const res = await rejeitar(menuId, itemId, rejeitada.id).expect(202);
     expect(res.body).toEqual({ trocada: true });
     await aguardarFila(app, FILAS);
 
-    const fotos = await fotosDoMenu(menuId);
-    expect(fotos).toHaveLength(1);
-    expect(fotos[0].id).not.toBe(antiga.id);
+    // Continua com 3: as 2 que ficaram + 1 nova; a rejeitada não está mais lá
+    const depois = await fotosDoMenu(menuId);
+    expect(depois).toHaveLength(3);
+    expect(depois.map((f) => f.id)).not.toContain(rejeitada.id);
+    for (const r of restantes) expect(depois.map((f) => f.id)).toContain(r.id);
 
     // A rejeitada fica inativa com o voto registrado, e deixa de ser servida
-    const rejeitada = await prisma.dishImage.findUniqueOrThrow({ where: { id: antiga.id } });
-    expect(rejeitada).toMatchObject({ ativa: false, votosNegativos: 1 });
-    await request(app.getHttpServer()).get(`/imagens/${antiga.id}`).expect(404);
+    expect(await prisma.dishImage.findUniqueOrThrow({ where: { id: rejeitada.id } })).toMatchObject({
+      ativa: false,
+      votosNegativos: 1,
+    });
+    await request(app.getHttpServer()).get(`/imagens/${rejeitada.id}`).expect(404);
 
-    // A nova veio de B: a busca recebeu A como "ignorar"
-    const nova = await prisma.dishImage.findUniqueOrThrow({ where: { id: fotos[0].id } });
-    expect(nova.urlOrigem).toBe(URL_B);
-    const ultima = pixabayFalsa.buscar.mock.calls.at(-1)!;
-    expect(ultima[2]).toEqual(new Set([URL_A]));
-    expect(await prisma.dishImage.count({ where: { dishId, ativa: true } })).toBe(1);
+    // A busca pediu só a vaga que abriu e mandou ignorar a rejeitada e as 2 que o prato já tem
+    const [, , opcoes] = pixabayFalsa.buscar.mock.calls.at(-1)! as [string, string, OpcoesBusca];
+    expect(opcoes.limite).toBe(1);
+    expect(opcoes.ignorar).toEqual(new Set([urlFoto('a'), urlFoto('b'), urlFoto('c')]));
+    // A nova veio da lista: é a "d", nunca a rejeitada
+    expect(await urlsAtivas(dishId!)).not.toContain(urlRejeitada);
+    expect(await urlsAtivas(dishId!)).toContain(urlFoto('d'));
   });
 
-  it('é idempotente: repetir o voto na foto já rejeitada não rejeita a nova nem busca de novo', async () => {
+  it('é idempotente: repetir o voto na foto já rejeitada não rejeita outra nem busca de novo', async () => {
     const { menuId, itemId } = await criarMenu('Lasagna');
-    fonteCom(URL_A, URL_B);
+    fonteCom(urlFoto('a'), urlFoto('b'), urlFoto('c'), urlFoto('d'));
     await buscarFotos(menuId);
-    const [antiga] = await fotosDoMenu(menuId);
+    const [rejeitada] = await fotosDoMenu(menuId);
 
-    await rejeitar(menuId, itemId, antiga.id).expect(202);
+    await rejeitar(menuId, itemId, rejeitada.id).expect(202);
     await aguardarFila(app, FILAS);
-    const [nova] = await fotosDoMenu(menuId);
+    const antesDoRepetido = (await fotosDoMenu(menuId)).map((f) => f.id);
     const chamadas = pixabayFalsa.buscar.mock.calls.length;
 
-    const repetido = await rejeitar(menuId, itemId, antiga.id).expect(202);
+    const repetido = await rejeitar(menuId, itemId, rejeitada.id).expect(202);
     expect(repetido.body).toEqual({ trocada: false });
     await aguardarFila(app, FILAS);
 
     expect(pixabayFalsa.buscar.mock.calls.length).toBe(chamadas);
-    expect((await fotosDoMenu(menuId)).map((f) => f.id)).toEqual([nova.id]);
-    expect((await prisma.dishImage.findUniqueOrThrow({ where: { id: antiga.id } })).votosNegativos).toBe(1);
+    expect((await fotosDoMenu(menuId)).map((f) => f.id)).toEqual(antesDoRepetido);
+    expect((await prisma.dishImage.findUniqueOrThrow({ where: { id: rejeitada.id } })).votosNegativos).toBe(1);
   });
 
-  it('sem outra foto aceitável, o prato fica sem foto', async () => {
+  it('sem outra candidata, o prato fica só com as fotos que sobraram', async () => {
     const { menuId, itemId } = await criarMenu('Feijoada');
-    fonteCom(URL_A);
+    fonteCom(urlFoto('a'), urlFoto('b'), urlFoto('c')); // só 3 candidatas: nenhuma sobra para repor
+    await buscarFotos(menuId);
+    const [rejeitada, ...restantes] = await fotosDoMenu(menuId);
+
+    await rejeitar(menuId, itemId, rejeitada.id).expect(202);
+    await aguardarFila(app, FILAS);
+
+    expect((await fotosDoMenu(menuId)).map((f) => f.id)).toEqual(restantes.map((f) => f.id));
+  });
+
+  it('prato com uma foto só e sem alternativa fica sem foto', async () => {
+    const { menuId, itemId } = await criarMenu('Paella');
+    fonteCom(urlFoto('a'));
     await buscarFotos(menuId);
     const [unica] = await fotosDoMenu(menuId);
 
@@ -170,7 +199,7 @@ describe('Não é esse prato (e2e)', () => {
   it('imagem de outro prato (404), item inexistente (404) e item sem prato (409)', async () => {
     const a = await criarMenu('Risotto');
     const b = await criarMenu('Gnocchi');
-    fonteCom(URL_A, URL_B);
+    fonteCom(urlFoto('a'), urlFoto('b'));
     await buscarFotos(b.menuId);
     const [fotoDeB] = await fotosDoMenu(b.menuId);
 
@@ -187,7 +216,7 @@ describe('Não é esse prato (e2e)', () => {
   });
 
   it('valida os ids: corpo sem uuid (400) e itemId inválido (400)', async () => {
-    const { menuId, itemId } = await criarMenu('Paella');
+    const { menuId, itemId } = await criarMenu('Ossobuco');
     await rejeitar(menuId, itemId, 'nao-e-uuid').expect(400);
     await request(app.getHttpServer()).post(`/menus/${menuId}/itens/${itemId}/nao-e-esse`).send({}).expect(400);
     await request(app.getHttpServer())

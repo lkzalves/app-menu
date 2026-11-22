@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { semArtigo } from '../catalogo/normalizar-nome.util.js';
 import { LimiteExcedidoError } from '../fila/limite-excedido.error.js';
 import { RedisService } from '../redis/redis.service.js';
-import { ImageProvider, ImagemEncontrada } from './image.provider.js';
+import { ImageProvider, ImagemEncontrada, OpcoesBusca } from './image.provider.js';
 import { idiomaPixabay, tagsCombinam } from './pixabay.util.js';
 
 const URL_API = 'https://pixabay.com/api/';
@@ -35,26 +35,25 @@ export class PixabayProvider extends ImageProvider {
   async buscar(
     nome: string,
     idioma: string,
-    ignorar?: ReadonlySet<string>,
-  ): Promise<ImagemEncontrada | null> {
+    { ignorar, limite }: OpcoesBusca,
+  ): Promise<ImagemEncontrada[]> {
     const lang = idiomaPixabay(idioma);
     const q = semArtigo(nome).slice(0, 100); // a Pixabay aceita até 100 caracteres
-    if (!q) return null;
+    if (!q) return [];
 
+    // Uma consulta só (em cache por 24 h) serve às fotos que faltam. Pula as que o prato já tem e as
+    // rejeitadas, senão o "não é esse prato" traria a mesma foto de volta
     const hits = await this.consultar(q, lang);
-    // Pula as fotos já rejeitadas, senão o "não é esse prato" traria a mesma foto de volta
-    const hit = hits.find(
-      (h) => !ignorar?.has(h.webformatURL) && tagsCombinam(h.tags, nome),
-    );
-    if (!hit) return null;
-
-    return {
-      fonte: 'PIXABAY',
-      urlDownload: hit.webformatURL,
-      paginaOrigem: hit.pageURL,
-      credito: hit.user,
-      licenca: 'Pixabay Content License',
-    };
+    return hits
+      .filter((h) => !ignorar.has(h.webformatURL) && tagsCombinam(h.tags, nome))
+      .slice(0, limite)
+      .map((hit) => ({
+        fonte: 'PIXABAY' as const,
+        urlDownload: hit.webformatURL,
+        paginaOrigem: hit.pageURL,
+        credito: hit.user,
+        licenca: 'Pixabay Content License',
+      }));
   }
 
   private async consultar(q: string, lang: string): Promise<PixabayHit[]> {

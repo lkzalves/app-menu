@@ -70,6 +70,14 @@ export class MenusApiService {
     return this.http.get<MenuDetalhe>(`${this.base}/menus/${menuId}`);
   }
 
+  // "Não é esse prato" numa foto: a API a tira do ar e busca outra para repor a vaga (chega pelo evento "imagem").
+  // trocada=false: a foto já tinha sido rejeitada antes
+  naoEEsse(menuId: string, itemId: string, imagemId: string) {
+    return this.http.post<{ trocada: boolean }>(`${this.base}/menus/${menuId}/itens/${itemId}/nao-e-esse`, {
+      imagemId,
+    });
+  }
+
   // 202: o OCR de cada recorte roda depois (os nomes chegam pelos eventos)
   marcarPratos(menuId: string, regioes: Regiao[]) {
     return this.http.post<{ itens: number }>(`${this.base}/menus/${menuId}/pratos`, { regioes });

@@ -89,7 +89,7 @@ describe('Marcar pratos (e2e)', () => {
 
   beforeEach(() => {
     ocrFalso.reconhecerRegioes.mockReset();
-    pixabayFalsa.buscar.mockReset().mockResolvedValue(null);
+    pixabayFalsa.buscar.mockReset().mockResolvedValue([]); // a fonte devolve uma lista (vazia = nada achado)
     wikipediaFalsa.buscar.mockReset().mockResolvedValue(null);
   });
 
@@ -229,7 +229,7 @@ describe('Marcar pratos (e2e)', () => {
       nomeNormalizado: 'tartare',
     });
     // O worker de OCR enfileirou as duas buscas, que rodaram com o nome lido e o idioma do menu
-    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA, expect.any(Set));
+    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA, { ignorar: new Set(), limite: 3 });
     expect(wikipediaFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA);
   });
 

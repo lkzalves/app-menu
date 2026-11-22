@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDisk, serveFile, StorageDisk } from '@nestjs/storage';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { IMAGE_PROVIDERS, ImageProvider } from './image.provider.js';
+import { IMAGE_PROVIDERS, ImageProvider, ImagemEncontrada } from './image.provider.js';
+import { FOTOS_POR_PRATO } from './imagens.constants.js';
 
 const TAMANHO_MAXIMO = 5 * 1024 * 1024; // 5 MB
 const EXTENSOES: Record<string, string> = {
@@ -23,53 +24,74 @@ export class ImagensService {
     @Inject(IMAGE_PROVIDERS) private readonly providers: ImageProvider[],
   ) {}
 
-  // Garante uma foto ativa para o prato. Devolve false se nenhuma fonte achou algo aproveitável
+  // Completa o prato até FOTOS_POR_PRATO fotos ativas, sem repetir as que ele já tem nem as que o cliente
+  // rejeitou. Devolve true se adicionou alguma foto (aí o app precisa ser avisado)
   async garantirImagem(dishId: string, nome: string, idioma: string): Promise<boolean> {
-    const existente = await this.prisma.dishImage.findFirst({
+    const ativas = await this.prisma.dishImage.findMany({
       where: { dishId, ativa: true },
-      select: { id: true },
+      select: { urlOrigem: true },
     });
-    if (existente) return true; // cache compartilhado: prato resolvido uma vez serve para todos
+    if (ativas.length >= FOTOS_POR_PRATO) return false; // cache compartilhado: prato completo não busca de novo
 
-    // Fotos que o cliente já rejeitou ficam inativas; as fontes não podem devolvê-las de novo
+    // As fontes não podem devolver nem as fotos rejeitadas (inativas) nem as que o prato já tem
     const rejeitadas = await this.prisma.dishImage.findMany({
       where: { dishId, ativa: false },
       select: { urlOrigem: true },
     });
-    const ignorar = new Set(rejeitadas.map((r) => r.urlOrigem));
+    const ignorar = new Set([...ativas, ...rejeitadas].map((i) => i.urlOrigem));
 
-    // Em ordem: a primeira fonte que achar e entregar um arquivo válido ganha
+    let adicionou = false;
+    // Em ordem: cada fonte entrega o que tem; se ainda faltar, a próxima completa
     for (const provider of this.providers) {
-      const achada = await provider.buscar(nome, idioma, ignorar);
-      if (!achada) continue;
+      // Recontar a cada fonte: outra rejeição pode ter aberto mais uma vaga nesse meio tempo
+      let faltam = FOTOS_POR_PRATO - (await this.prisma.dishImage.count({ where: { dishId, ativa: true } }));
+      if (faltam <= 0) break;
 
-      const arquivo = await this.baixar(achada.urlDownload);
-      if (!arquivo) continue; // download ruim conta como "não achou": tenta a próxima fonte
+      // Cópia: a fonte recebe o que valia nesta chamada, e este Set segue crescendo logo abaixo
+      const achadas = await provider.buscar(nome, idioma, { ignorar: new Set(ignorar), limite: faltam });
+      for (const achada of achadas) {
+        if (faltam <= 0) break;
+        if (ignorar.has(achada.urlDownload)) continue; // a fonte não pode repetir, mas não custa garantir
+        ignorar.add(achada.urlDownload); // mesmo que o download falhe, não tenta a mesma de novo
 
-      const key = `pratos/${dishId}/${randomUUID()}.${arquivo.extensao}`;
-      await this.fotos.put(key, arquivo.bytes, {
-        contentType: arquivo.tipo,
-        cacheControl: CACHE_CONTROL,
-      });
-      try {
-        await this.prisma.dishImage.create({
-          data: {
-            dishId,
-            fonte: achada.fonte,
-            urlOrigem: achada.urlDownload,
-            paginaOrigem: achada.paginaOrigem,
-            storageKey: key,
-            credito: achada.credito,
-            licenca: achada.licenca,
-          },
-        });
-      } catch (e) {
-        await this.fotos.delete(key); // não deixa arquivo órfão
-        throw e;
+        const arquivo = await this.baixar(achada.urlDownload);
+        if (!arquivo) continue; // download ruim: passa para a próxima candidata
+
+        await this.guardar(dishId, achada, arquivo);
+        faltam--;
+        adicionou = true;
       }
-      return true;
     }
-    return false;
+    return adicionou;
+  }
+
+  // Grava o arquivo no storage e o DishImage no banco
+  private async guardar(
+    dishId: string,
+    achada: ImagemEncontrada,
+    arquivo: { bytes: Buffer; tipo: string; extensao: string },
+  ) {
+    const key = `pratos/${dishId}/${randomUUID()}.${arquivo.extensao}`;
+    await this.fotos.put(key, arquivo.bytes, {
+      contentType: arquivo.tipo,
+      cacheControl: CACHE_CONTROL,
+    });
+    try {
+      await this.prisma.dishImage.create({
+        data: {
+          dishId,
+          fonte: achada.fonte,
+          urlOrigem: achada.urlDownload,
+          paginaOrigem: achada.paginaOrigem,
+          storageKey: key,
+          credito: achada.credito,
+          licenca: achada.licenca,
+        },
+      });
+    } catch (e) {
+      await this.fotos.delete(key); // não deixa arquivo órfão
+      throw e;
+    }
   }
 
   // Serve o arquivo de uma imagem ativa (Content-Type, ETag, Range e cache vêm do serveFile)

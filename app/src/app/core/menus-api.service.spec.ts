@@ -43,6 +43,15 @@ describe('MenusApiService', () => {
     expect(api.urlDosEventos('abc')).toBe(`${environment.apiUrl}/menus/abc/eventos`);
   });
 
+  it('naoEEsse: POST /menus/:id/itens/:itemId/nao-e-esse com a foto rejeitada', () => {
+    api.naoEEsse('abc', 'it1', 'img1').subscribe((r) => expect(r.trocada).toBe(true));
+
+    const req = http.expectOne(`${environment.apiUrl}/menus/abc/itens/it1/nao-e-esse`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ imagemId: 'img1' });
+    req.flush({ trocada: true });
+  });
+
   it('obterMenu: GET /menus/:id', () => {
     api.obterMenu('abc').subscribe((m) => expect(m.status).toBe('CONCLUIDO'));
 

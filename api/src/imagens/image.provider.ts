@@ -9,17 +9,19 @@ export interface ImagemEncontrada {
   licenca: string;
 }
 
+export interface OpcoesBusca {
+  ignorar: ReadonlySet<string>; // urlDownload que não podem voltar
+  limite: number; // quantas fotos no máximo
+}
+
 // Token da lista de fontes, na ordem em que são tentadas (ImageProvider[])
 export const IMAGE_PROVIDERS = Symbol('IMAGE_PROVIDERS');
 
 // Classe abstrata pelo mesmo motivo do OcrProvider: serve de token de injeção.
 // Cada fonte (Pixabay, Wikidata, Brave...) estende esta classe.
 export abstract class ImageProvider {
-  // Devolve a melhor foto para o prato naquele idioma, ou null se a fonte não tiver nada confiável.
-  // `ignorar`: urlDownload de fotos que o cliente já rejeitou ("não é esse prato"); nunca devolver estas
-  abstract buscar(
-    nome: string,
-    idioma: string,
-    ignorar?: ReadonlySet<string>,
-  ): Promise<ImagemEncontrada | null>;
+  // Devolve até `limite` fotos para o prato naquele idioma, da melhor para a pior, ou [] se a fonte não
+  // tiver nada confiável. Nunca devolve uma urlDownload que esteja em `ignorar` (fotos que o prato já
+  // tem ou que o cliente rejeitou com "não é esse prato")
+  abstract buscar(nome: string, idioma: string, opcoes: OpcoesBusca): Promise<ImagemEncontrada[]>;
 }
