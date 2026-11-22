@@ -115,7 +115,7 @@ describe('Imagens dos pratos (e2e)', () => {
       credito: 'fotografo',
       licenca: 'Pixabay Content License',
     });
-    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('Tiramisu', IDIOMA);
+    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('Tiramisu', IDIOMA, expect.any(Set));
     expect(fetchMock).toHaveBeenCalledWith(URL_FOTO);
 
     // Arquivo gravado no storage e servido com os mesmos bytes
@@ -181,7 +181,7 @@ describe('Imagens dos pratos (e2e)', () => {
 
     // Pizza gravada; Risotto tomou 429, esperou e foi refeito
     expect(pixabayFalsa.buscar).toHaveBeenCalledTimes(3);
-    expect(pixabayFalsa.buscar).toHaveBeenLastCalledWith('Risotto', IDIOMA);
+    expect(pixabayFalsa.buscar).toHaveBeenLastCalledWith('Risotto', IDIOMA, expect.any(Set));
     expect(menu.itens.map((i: { dish: { imagens: unknown[] } }) => i.dish.imagens.length)).toEqual([1, 1]);
   });
 

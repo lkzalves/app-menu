@@ -32,13 +32,20 @@ export class PixabayProvider extends ImageProvider {
     this.prefixoCache = `${config.get<string>('REDIS_PREFIX') ?? 'bull'}:pixabay:`;
   }
 
-  async buscar(nome: string, idioma: string): Promise<ImagemEncontrada | null> {
+  async buscar(
+    nome: string,
+    idioma: string,
+    ignorar?: ReadonlySet<string>,
+  ): Promise<ImagemEncontrada | null> {
     const lang = idiomaPixabay(idioma);
     const q = semArtigo(nome).slice(0, 100); // a Pixabay aceita até 100 caracteres
     if (!q) return null;
 
     const hits = await this.consultar(q, lang);
-    const hit = hits.find((h) => tagsCombinam(h.tags, nome));
+    // Pula as fotos já rejeitadas, senão o "não é esse prato" traria a mesma foto de volta
+    const hit = hits.find(
+      (h) => !ignorar?.has(h.webformatURL) && tagsCombinam(h.tags, nome),
+    );
     if (!hit) return null;
 
     return {

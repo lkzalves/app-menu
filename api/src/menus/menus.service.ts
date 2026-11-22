@@ -13,17 +13,23 @@ import {
   jobsDePratos,
   OPCOES_JOB_PRATO,
 } from '../fila/fila.constants.js';
+import { EventosService } from '../eventos/eventos.service.js';
 import { OcrProvider } from '../ocr/ocr.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
 import { RegiaoDto } from './dto/marcar-pratos.dto.js';
 
+// Votos "não é esse prato" para tirar uma foto do ar. O catálogo é compartilhado: com vários
+// usuários (etapa 9), subir este número ou contar por dispositivo
+const LIMITE_VOTOS_NEGATIVOS = 1;
+
 @Injectable()
 export class MenusService {
   // O Nest injeta a única instância do PrismaService
   constructor(
     private readonly prisma: PrismaService,
+    private readonly eventos: EventosService,
     @InjectDisk('fotos') private readonly fotos: StorageDisk,
     private readonly ocr: OcrProvider,
     @InjectQueue(FILA_OCR) private readonly filaOcr: Queue<DadosJobOcr>,
@@ -181,6 +187,46 @@ export class MenusService {
       })),
     );
     return { itens: itens.length };
+  }
+
+  // "Não é esse prato": o voto vale para a foto que o cliente viu (imagemId), então clique duplo ou
+  // atrasado não rejeita a foto nova. Só a foto é invalidada; a descrição não muda
+  async naoEEsse(menuId: string, itemId: string, imagemId: string) {
+    const item = await this.prisma.menuItem.findFirst({
+      where: { id: itemId, menuId },
+      select: { dishId: true, nomeOriginal: true, menu: { select: { idioma: true } } },
+    });
+    if (!item) throw new NotFoundException('Item não encontrado');
+    if (!item.dishId) throw new ConflictException('Item ainda sem prato no catálogo');
+    const { dishId } = item;
+
+    const imagem = await this.prisma.dishImage.findFirst({
+      where: { id: imagemId, dishId },
+      select: { id: true },
+    });
+    if (!imagem) throw new NotFoundException('Imagem não encontrada neste prato');
+
+    // updateMany com ativa:true é atômico: se a foto já foi rejeitada, count = 0 e nada se repete
+    const votou = await this.prisma.dishImage.updateMany({
+      where: { id: imagemId, ativa: true },
+      data: { votosNegativos: { increment: 1 } },
+    });
+    if (votou.count === 0) return { trocada: false };
+
+    const desativou = await this.prisma.dishImage.updateMany({
+      where: { id: imagemId, ativa: true, votosNegativos: { gte: LIMITE_VOTOS_NEGATIVOS } },
+      data: { ativa: false },
+    });
+    if (desativou.count === 0) return { trocada: false }; // ainda faltam votos
+
+    // O app refaz o GET (prato sem a foto errada) e o worker procura outra, ignorando as rejeitadas
+    await this.eventos.publicar({ tipo: 'imagem', dishId });
+    await this.filaImagens.addBulk(
+      jobsDePratos('imagem', [
+        { dishId, nome: item.nomeOriginal, idioma: item.menu.idioma ?? 'und' },
+      ]),
+    );
+    return { trocada: true };
   }
 
   async addItem(menuId: string, dto: CreateMenuItemDto) {

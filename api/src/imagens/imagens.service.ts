@@ -31,9 +31,16 @@ export class ImagensService {
     });
     if (existente) return true; // cache compartilhado: prato resolvido uma vez serve para todos
 
+    // Fotos que o cliente já rejeitou ficam inativas; as fontes não podem devolvê-las de novo
+    const rejeitadas = await this.prisma.dishImage.findMany({
+      where: { dishId, ativa: false },
+      select: { urlOrigem: true },
+    });
+    const ignorar = new Set(rejeitadas.map((r) => r.urlOrigem));
+
     // Em ordem: a primeira fonte que achar e entregar um arquivo válido ganha
     for (const provider of this.providers) {
-      const achada = await provider.buscar(nome, idioma);
+      const achada = await provider.buscar(nome, idioma, ignorar);
       if (!achada) continue;
 
       const arquivo = await this.baixar(achada.urlDownload);

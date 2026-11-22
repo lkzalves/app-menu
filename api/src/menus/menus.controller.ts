@@ -16,6 +16,7 @@ import type { StoredUpload } from '@nestjs/storage';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
 import { MarcarPratosDto } from './dto/marcar-pratos.dto.js';
+import { NaoEEsseDto } from './dto/nao-e-esse.dto.js';
 import { MenusService } from './menus.service.js';
 
 @Controller('menus')
@@ -55,6 +56,17 @@ export class MenusController {
     @Body() dto: MarcarPratosDto,
   ) {
     return this.menusService.marcarPratos(id, dto.regioes);
+  }
+
+  // "Não é esse prato": rejeita a foto mostrada e busca outra. 202 = a nova foto chega depois (evento "imagem")
+  @Post(':id/itens/:itemId/nao-e-esse')
+  @HttpCode(202)
+  naoEEsse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: NaoEEsseDto,
+  ) {
+    return this.menusService.naoEEsse(id, itemId, dto.imagemId);
   }
 
   // Enfileira a busca da foto ilustrativa de cada prato. 202 = aceito, o worker faz depois

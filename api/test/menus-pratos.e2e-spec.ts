@@ -229,7 +229,7 @@ describe('Marcar pratos (e2e)', () => {
       nomeNormalizado: 'tartare',
     });
     // O worker de OCR enfileirou as duas buscas, que rodaram com o nome lido e o idioma do menu
-    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA);
+    expect(pixabayFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA, expect.any(Set));
     expect(wikipediaFalsa.buscar).toHaveBeenCalledWith('IL TARTARE', IDIOMA);
   });
 

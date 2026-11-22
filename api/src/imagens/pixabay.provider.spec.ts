@@ -74,6 +74,22 @@ describe('PixabayProvider', () => {
     });
   });
 
+  it('ignorar: pula as fotos já rejeitadas e pega a próxima que combina', async () => {
+    const rejeitada = { ...hit('tiramisu'), webformatURL: 'https://pixabay.com/get/a_640.jpg' };
+    const outra = { ...hit('tiramisu, cake'), webformatURL: 'https://pixabay.com/get/b_640.jpg' };
+    fetchMock.mockResolvedValue(resposta([rejeitada, outra]));
+
+    const r = await provider.buscar('Tiramisù', 'it', new Set([rejeitada.webformatURL]));
+    expect(r?.urlDownload).toBe(outra.webformatURL);
+  });
+
+  it('ignorar: se todas as que combinam foram rejeitadas, devolve null', async () => {
+    const unica = { ...hit('tiramisu'), webformatURL: 'https://pixabay.com/get/a_640.jpg' };
+    fetchMock.mockResolvedValue(resposta([unica]));
+
+    expect(await provider.buscar('Tiramisù', 'it', new Set([unica.webformatURL]))).toBeNull();
+  });
+
   it('devolve null quando nenhuma tag combina', async () => {
     fetchMock.mockResolvedValue(resposta([hit('sunset, beach')]));
     expect(await provider.buscar('Tiramisù', 'it')).toBeNull();
