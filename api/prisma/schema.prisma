@@ -36,6 +36,11 @@ model MenuItem {
   nomeTraduzido String?
   descricao     String?
   preco         Decimal? @db.Decimal(10, 2)
+  // Onde o nome está na foto (pixels), para o app destacar o recorte e reprocessar depois
+  regiaoX       Int?
+  regiaoY       Int?
+  regiaoLargura Int?
+  regiaoAltura  Int?
 
   @@index([menuId]) // Postgres não cria índice em FK sozinho
 }

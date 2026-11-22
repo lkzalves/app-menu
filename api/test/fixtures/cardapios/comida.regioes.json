@@ -1,0 +1,9 @@
+[
+  { "x": 22, "y": 376, "largura": 177, "altura": 26, "nome": "TAGLIERE MISTO" },
+  { "x": 26, "y": 536, "largura": 177, "altura": 27, "nome": "PATATINE FRITTE" },
+  { "x": 28, "y": 657, "largura": 234, "altura": 28, "nome": "FRITTATINA BOLOGNESE" },
+  { "x": 441, "y": 741, "largura": 255, "altura": 24, "nome": "IL PROSCIUTTO ROSOLATO" },
+  { "x": 440, "y": 963, "largura": 135, "altura": 26, "nome": "I GAMBERI" },
+  { "x": 455, "y": 1090, "largura": 168, "altura": 26, "nome": "LE MELANZANE" },
+  { "x": 442, "y": 1158, "largura": 130, "altura": 26, "nome": "BAMBINI" }
+]

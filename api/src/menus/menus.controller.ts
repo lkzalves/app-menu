@@ -15,6 +15,7 @@ import { uploadToDisk } from '@nestjs/storage';
 import type { StoredUpload } from '@nestjs/storage';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
+import { MarcarPratosDto } from './dto/marcar-pratos.dto.js';
 import { MenusService } from './menus.service.js';
 
 @Controller('menus')
@@ -43,6 +44,16 @@ export class MenusController {
     @Body() dto: CreateMenuItemDto,
   ) {
     return this.menusService.addItem(id, dto);
+  }
+
+  // Recebe os retângulos que o cliente circulou e cria um prato por recorte lido
+  @Post(':id/pratos')
+  @HttpCode(200) // substitui a lista de pratos, então 200 em vez de 201
+  marcarPratos(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MarcarPratosDto,
+  ) {
+    return this.menusService.marcarPratos(id, dto.regioes);
   }
 
   // Roda o OCR na foto já enviada e guarda o texto bruto em Menu.textoOcr

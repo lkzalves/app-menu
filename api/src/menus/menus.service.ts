@@ -5,6 +5,8 @@ import { OcrProvider } from '../ocr/ocr.provider.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
 import { CreateMenuDto } from './dto/create-menu.dto.js';
+import { RegiaoDto } from './dto/marcar-pratos.dto.js';
+import { limparNomePrato } from './nome-prato.util.js';
 
 @Injectable()
 export class MenusService {
@@ -70,6 +72,40 @@ export class MenusService {
       await this.prisma.menu.update({ where: { id }, data: { status: 'ERRO' } });
       throw e; // vira HTTP 500
     }
+  }
+
+  // O cliente circulou os nomes: lê só esses recortes e troca a lista de pratos do menu
+  async marcarPratos(id: string, regioes: RegiaoDto[]) {
+    const menu = await this.prisma.menu.findUnique({
+      where: { id },
+      select: { fotoKey: true },
+    });
+    if (!menu) throw new NotFoundException('Menu não encontrado');
+    if (!menu.fotoKey) throw new ConflictException('Menu sem foto: envie a foto antes de marcar os pratos');
+
+    const imagem = await this.fotos.getBuffer(menu.fotoKey);
+    const textos = await this.ocr.reconhecerRegioes(imagem, regioes);
+
+    // Recorte que não virou texto é descartado; ordem segue a lista que o app mandou
+    const itens = regioes
+      .map((r, i) => ({ r, nome: limparNomePrato(textos[i] ?? '') }))
+      .filter((p) => p.nome)
+      .map(({ r, nome }, ordem) => ({
+        menuId: id,
+        ordem,
+        nomeOriginal: nome.slice(0, 200), // mesmo limite do DTO de item
+        regiaoX: r.x,
+        regiaoY: r.y,
+        regiaoLargura: r.largura,
+        regiaoAltura: r.altura,
+      }));
+
+    // Transação: ou troca tudo ou não troca nada. O app manda sempre a lista completa
+    await this.prisma.$transaction([
+      this.prisma.menuItem.deleteMany({ where: { menuId: id } }),
+      this.prisma.menuItem.createMany({ data: itens }),
+    ]);
+    return this.findOne(id);
   }
 
   async addItem(menuId: string, dto: CreateMenuItemDto) {

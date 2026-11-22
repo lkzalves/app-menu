@@ -8,7 +8,7 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
 ## Requisitos que guiam as decisões
 
 - Rápido: primeiros pratos na tela em poucos segundos, o resto chega aos poucos.
-- Zero esforço: o cliente não revisa texto de OCR. Só um botão "não é esse prato".
+- Pouco esforço: o cliente só circula os nomes dos pratos que quer ver; não digita nem revisa texto. Só um botão "não é esse prato".
 - Multi-idioma: detectar o idioma, mostrar o nome original + tradução.
 - Toda foto rotulada como "imagem ilustrativa".
 - Cache compartilhado: prato resolvido uma vez serve para todos.
@@ -30,11 +30,11 @@ com foto ilustrativa e uma descrição curta, em português. Sem IA generativa d
 - [x] 1. API base: Prisma 7, models Menu e MenuItem, CRUD com validação
 - [x] 2. Upload da foto (disco local) ligado a um Menu
 - [x] 3. OCR atrás de OcrProvider: Tesseract.js agora; Google Vision depois, se a qualidade pedir
-- [ ] 4. Parser: texto do OCR → itens (nome, descrição, preço), com testes usando cardápios reais em pt, en, es, it
+- [ ] 4. Pratos marcados: o cliente circula os nomes na foto, o app envia os retângulos e a API faz o OCR de cada recorte (nome do prato), com testes usando cardápios reais
 - [ ] 5. Tradução atrás de TranslationProvider: nome em pt (para exibir) e em en (para buscar foto)
 - [ ] 6. Catálogo de pratos: Dish + DishName (nome por idioma) + DishImage (fonte, licença, crédito, votos), busca aproximada com pg_trgm + unaccent
 - [ ] 7. Busca de foto e descrição: cadeia de ImageProvider (catálogo → Wikidata → Pexels → Brave), gravando no catálogo
-- [ ] 8. Fila + worker: OCR, tradução e busca assíncronos; SSE mandando cada prato assim que fica pronto
-- [ ] 9. App Ionic: câmera → tela de resultado progressiva → "não é esse prato" (troca a foto e alimenta o catálogo)
+- [ ] 8. Fila + worker: OCR dos recortes, tradução e busca assíncronos; SSE mandando cada prato assim que fica pronto
+- [ ] 9. App Ionic: câmera → circular os nomes dos pratos → lista progressiva (foto ilustrativa + nome original + tradução) → "não é esse prato" (troca a foto e alimenta o catálogo)
 - [ ] 10. Produção: usuário anônimo por dispositivo, limite de uso por dispositivo, deploy, Sentry
-- [ ] 11. Extras: compartilhar resultado, histórico, filtros (vegetariano, alergênicos)
+- [ ] 11. Extras: compartilhar resultado, histórico, filtros (vegetariano, alergênicos), sugestão automática dos títulos (caixas de linha do OCR) para o cliente só confirmar

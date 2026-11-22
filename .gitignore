@@ -66,3 +66,6 @@ agents.md
 ROADMAP.md
 # Cache dos idiomas do Tesseract
 /api/.tessdata
+
+# Fotos de cardápios usadas para gerar fixtures (tamanho e direitos de imagem)
+/api/test/fixtures/cardapios/fotos
