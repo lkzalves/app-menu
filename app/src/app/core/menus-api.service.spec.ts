@@ -27,6 +27,20 @@ describe('MenusApiService', () => {
     req.flush({ id: 'abc', idioma: 'it', fotoKey: null });
   });
 
+  it('marcarPratos: POST /menus/:id/pratos com { regioes }', () => {
+    const regioes = [{ x: 10, y: 20, largura: 300, altura: 40 }];
+    api.marcarPratos('abc', regioes).subscribe((r) => expect(r.itens).toBe(1));
+
+    const req = http.expectOne(`${environment.apiUrl}/menus/abc/pratos`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ regioes });
+    req.flush({ itens: 1 });
+  });
+
+  it('urlDaFoto: aponta para GET /menus/:id/foto', () => {
+    expect(api.urlDaFoto('abc')).toBe(`${environment.apiUrl}/menus/abc/foto`);
+  });
+
   it('enviarFoto: POST multipart em /menus/:id/foto, no campo "foto"', () => {
     const foto = new Blob(['x'], { type: 'image/jpeg' });
     api.enviarFoto('abc', foto).subscribe();

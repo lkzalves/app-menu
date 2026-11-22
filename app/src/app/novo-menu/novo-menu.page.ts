@@ -1,4 +1,5 @@
 import { Component, OnDestroy, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import {
   IonButton,
@@ -14,7 +15,7 @@ import {
   ToastController,
 } from '@ionic/angular';
 import { addIcons } from 'ionicons';
-import { camera, checkmarkCircle } from 'ionicons/icons';
+import { camera } from 'ionicons/icons';
 import { IDIOMAS } from '../core/idiomas';
 import { MenusApiService } from '../core/menus-api.service';
 import { FotoPreparada, prepararFoto } from '../core/preparar-foto';
@@ -39,6 +40,7 @@ import { FotoPreparada, prepararFoto } from '../core/preparar-foto';
 export class NovoMenuPage implements OnDestroy {
   private readonly api = inject(MenusApiService);
   private readonly toast = inject(ToastController);
+  private readonly router = inject(Router);
 
   readonly idiomas = IDIOMAS;
 
@@ -47,13 +49,12 @@ export class NovoMenuPage implements OnDestroy {
   readonly idioma = signal<string | null>(null);
   readonly preparando = signal(false);
   readonly enviando = signal(false);
-  readonly enviado = signal(false);
   // Guardado entre tentativas: se o upload falhar, tentar de novo não cria outro menu
   readonly menuId = signal<string | null>(null);
 
   constructor() {
     // No Ionic standalone cada ícone precisa ser registrado, senão o <ion-icon> aparece vazio
-    addIcons({ camera, checkmarkCircle });
+    addIcons({ camera });
   }
 
   async aoEscolherArquivo(evento: Event) {
@@ -93,21 +94,13 @@ export class NovoMenuPage implements OnDestroy {
         this.menuId.set(id);
       }
       await firstValueFrom(this.api.enviarFoto(id, foto.blob));
-      this.enviado.set(true);
+      // A tela de marcar busca a foto no servidor (GET /menus/:id/foto): só o id vai na rota
+      await this.router.navigate(['/menus', id, 'marcar']);
     } catch {
       await this.avisar('Não foi possível enviar. Confira a conexão e tente de novo.');
     } finally {
       this.enviando.set(false);
     }
-  }
-
-  novoCardapio() {
-    this.liberarPreview();
-    this.foto.set(null);
-    this.previewUrl.set(null);
-    this.idioma.set(null);
-    this.menuId.set(null);
-    this.enviado.set(false);
   }
 
   ngOnDestroy() {

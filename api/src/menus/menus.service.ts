@@ -1,7 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { randomUUID } from 'node:crypto';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectDisk, StorageDisk } from '@nestjs/storage';
+import { InjectDisk, serveFile, StorageDisk } from '@nestjs/storage';
 import { Prisma } from '../generated/prisma/client.js';
 import { Queue } from 'bullmq';
 import {
@@ -124,6 +124,19 @@ export class MenusService {
     });
     if (menu.fotoKey) await this.fotos.delete(menu.fotoKey); // troca: apaga a foto antiga
     return atualizado;
+  }
+
+  // A foto do menu como o servidor a tem (os mesmos bytes que o OCR lê): o app desenha os retângulos
+  // em cima dela, então as coordenadas em pixels batem. A URL é a mesma depois de trocar a foto;
+  // o ETag faz o navegador revalidar (cache privado, por padrão do serveFile)
+  async servirFoto(id: string, req: unknown, res: unknown) {
+    const menu = await this.prisma.menu.findUnique({
+      where: { id },
+      select: { fotoKey: true },
+    });
+    if (!menu) throw new NotFoundException('Menu não encontrado');
+    if (!menu.fotoKey) throw new NotFoundException('Menu sem foto');
+    return serveFile(this.fotos, menu.fotoKey, { req, res, disposition: 'inline' });
   }
 
   // Síncrono por enquanto; no passo 8 vira job na fila

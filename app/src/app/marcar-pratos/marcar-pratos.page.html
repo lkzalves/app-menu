@@ -1,0 +1,107 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-segment [value]="modo()" (ionChange)="mudarModo($event.detail.value)">
+      <ion-segment-button value="marcar">
+        <ion-label>Marcar</ion-label>
+      </ion-segment-button>
+      <ion-segment-button value="mover">
+        <ion-label>Mover</ion-label>
+      </ion-segment-button>
+    </ion-segment>
+  </ion-toolbar>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-button (click)="mudarZoom(-1)" [disabled]="zoom() <= 1" aria-label="Diminuir zoom">
+        <ion-icon slot="icon-only" name="remove"></ion-icon>
+      </ion-button>
+      <span class="zoom">Zoom {{ zoom() }}×</span>
+      <ion-button (click)="mudarZoom(1)" [disabled]="zoom() >= 4" aria-label="Aumentar zoom">
+        <ion-icon slot="icon-only" name="add"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [scrollY]="false">
+  @if (enviado()) {
+    <div class="enviado">
+      <ion-icon name="checkmark-circle" color="success"></ion-icon>
+      <h2>{{ regioes().length }} {{ regioes().length === 1 ? 'prato enviado' : 'pratos enviados' }}</h2>
+      <ion-button fill="outline" (click)="enviado.set(false)">Marcar de novo</ion-button>
+    </div>
+  } @else if (erroFoto()) {
+    <div class="enviado">
+      <h2>Não foi possível carregar a foto</h2>
+      <ion-button fill="outline" (click)="voltar()">Voltar</ion-button>
+    </div>
+  } @else {
+    <div class="pagina">
+      <p class="dica">
+        @if (modo() === 'marcar') {
+          Passe o dedo sobre o nome de cada prato. Use <strong>+</strong> para dar zoom e <strong>Mover</strong> para rolar a foto.
+        } @else {
+          Role a foto com o dedo. Volte para <strong>Marcar</strong> para circular os pratos.
+        }
+      </p>
+
+      <!-- .tela rola; .foto cresce com o zoom (largura em %) e a altura acompanha a imagem -->
+      <div class="tela" [class.marcando]="modo() === 'marcar'">
+        <div class="foto" [style.width.%]="zoom() * 100">
+          <img [src]="urlFoto" alt="Foto do cardápio" draggable="false" (load)="aoCarregar($event)" (error)="erroFoto.set(true)" />
+
+          @if (foto(); as f) {
+            <!-- viewBox = tamanho da foto em pixels: o traço é desenhado direto em pixels da foto -->
+            <svg
+              class="camada"
+              [attr.viewBox]="'0 0 ' + f.largura + ' ' + f.altura"
+              (pointerdown)="aoPressionar($event)"
+              (pointermove)="aoMover($event)"
+              (pointerup)="aoSoltar($event)"
+              (pointercancel)="aoCancelar()"
+            >
+              <polyline [attr.points]="tracoSvg()" [style.stroke-width.px]="espessura" />
+            </svg>
+
+            @for (r of regioes(); track $index) {
+              <div
+                class="regiao"
+                [style.left.%]="(r.x / f.largura) * 100"
+                [style.top.%]="(r.y / f.altura) * 100"
+                [style.width.%]="(r.largura / f.largura) * 100"
+                [style.height.%]="(r.altura / f.altura) * 100"
+              >
+                <button type="button" class="rotulo" (click)="remover($index)" [attr.aria-label]="'Remover prato ' + ($index + 1)">
+                  {{ $index + 1 }} ×
+                </button>
+              </div>
+            }
+          } @else {
+            <ion-spinner class="carregando" name="crescent"></ion-spinner>
+          }
+        </div>
+      </div>
+    </div>
+  }
+</ion-content>
+
+@if (!enviado() && !erroFoto()) {
+  <ion-footer>
+    <ion-toolbar>
+      <ion-buttons slot="start">
+        <ion-button (click)="desfazer()" [disabled]="regioes().length === 0 || enviando()">
+          <ion-icon slot="start" name="arrow-undo"></ion-icon>
+          Desfazer
+        </ion-button>
+      </ion-buttons>
+      <ion-buttons slot="end">
+        <ion-button fill="solid" color="primary" (click)="enviar()" [disabled]="regioes().length === 0 || enviando()">
+          @if (enviando()) {
+            <ion-spinner name="crescent"></ion-spinner>
+          } @else {
+            Enviar ({{ regioes().length }})
+          }
+        </ion-button>
+      </ion-buttons>
+    </ion-toolbar>
+  </ion-footer>
+}

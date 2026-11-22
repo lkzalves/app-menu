@@ -93,4 +93,33 @@ describe('Foto do menu (e2e)', () => {
       .expect(404);
     expect(arquivos()).toBe(antes);
   });
+
+  describe('GET /menus/:id/foto', () => {
+    it('devolve os mesmos bytes enviados, como imagem, com ETag (200)', async () => {
+      const res = await request(app.getHttpServer()).get(`/menus/${menuId}/foto`).expect(200);
+      expect(res.headers['content-type']).toBe('image/png');
+      expect(res.headers['content-disposition']).toMatch(/^inline/);
+      expect(res.headers['etag']).toBeDefined();
+      expect(res.headers['cache-control']).toContain('private');
+      expect(res.body).toEqual(PNG);
+    });
+
+    it('revalida pelo ETag (304)', async () => {
+      const primeira = await request(app.getHttpServer()).get(`/menus/${menuId}/foto`).expect(200);
+      await request(app.getHttpServer())
+        .get(`/menus/${menuId}/foto`)
+        .set('If-None-Match', primeira.headers['etag'])
+        .expect(304);
+    });
+
+    it('menu sem foto responde 404', async () => {
+      const novo = await request(app.getHttpServer()).post('/menus').send({ restaurante: MARCADOR });
+      await request(app.getHttpServer()).get(`/menus/${novo.body.id}/foto`).expect(404);
+    });
+
+    it('menu inexistente responde 404 e id inválido responde 400', async () => {
+      await request(app.getHttpServer()).get(`/menus/${UUID_INEXISTENTE}/foto`).expect(404);
+      await request(app.getHttpServer()).get('/menus/xx/foto').expect(400);
+    });
+  });
 });

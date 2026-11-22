@@ -7,10 +7,13 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Req,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Request, Response } from 'express';
 import { uploadToDisk } from '@nestjs/storage';
 import type { StoredUpload } from '@nestjs/storage';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto.js';
@@ -88,6 +91,16 @@ export class MenusController {
   @HttpCode(200) // não cria recurso novo, então 200 em vez do 201 padrão do POST
   executarOcr(@Param('id', ParseUUIDPipe) id: string) {
     return this.menusService.executarOcr(id);
+  }
+
+  // A foto do cardápio enviada em POST :id/foto. O app mostra esta imagem na hora de marcar os pratos
+  @Get(':id/foto')
+  obterFoto(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response, // passthrough: o Nest ainda devolve o retorno do método
+  ) {
+    return this.menusService.servirFoto(id, req, res);
   }
 
   // Multipart, campo "foto". O tipo é checado pelos bytes da imagem (415 se não for imagem aceita)
