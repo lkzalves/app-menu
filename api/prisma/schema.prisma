@@ -21,6 +21,7 @@ model Menu {
   restaurante String?
   idioma      String?
   status      StatusMenu @default(RECEBIDO)
+  fotoKey     String?    // chave do arquivo no storage (não o caminho)
   criadoEm    DateTime   @default(now()) @db.Timestamptz(3)
   itens       MenuItem[]
 }
