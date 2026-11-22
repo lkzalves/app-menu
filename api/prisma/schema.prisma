@@ -1,0 +1,39 @@
+generator client {
+  provider            = "prisma-client"           // gerador novo do Prisma 7
+  output              = "../src/generated/prisma" // obrigatório no Prisma 7
+  moduleFormat        = "esm"
+  importFileExtension = "js"                      // casa com module: nodenext
+}
+
+datasource db {
+  provider = "postgresql" // a URL vem do prisma.config.ts
+}
+
+enum StatusMenu {
+  RECEBIDO
+  PROCESSANDO
+  CONCLUIDO
+  ERRO
+}
+
+model Menu {
+  id          String     @id @default(uuid())
+  restaurante String?
+  idioma      String?
+  status      StatusMenu @default(RECEBIDO)
+  criadoEm    DateTime   @default(now()) @db.Timestamptz(3)
+  itens       MenuItem[]
+}
+
+model MenuItem {
+  id            String   @id @default(uuid())
+  menuId        String
+  menu          Menu     @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  ordem         Int
+  nomeOriginal  String
+  nomeTraduzido String?
+  descricao     String?
+  preco         Decimal? @db.Decimal(10, 2)
+
+  @@index([menuId]) // Postgres não cria índice em FK sozinho
+}
