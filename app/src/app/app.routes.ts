@@ -2,8 +2,8 @@ import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   {
-    path: 'home',
-    loadComponent: () => import('./home/home.page').then((m) => m.HomePage),
+    path: 'novo-menu',
+    loadComponent: () => import('./novo-menu/novo-menu.page').then((m) => m.NovoMenuPage),
   },
-  { path: '', redirectTo: 'home', pathMatch: 'full' },
+  { path: '', redirectTo: 'novo-menu', pathMatch: 'full' },
 ];

@@ -1,0 +1,62 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>Novo cardápio</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+  @if (enviado()) {
+    <div class="enviado">
+      <ion-icon name="checkmark-circle" color="success"></ion-icon>
+      <h2>Foto enviada</h2>
+      <p class="id">Cardápio {{ menuId() }}</p>
+      <ion-button fill="outline" (click)="novoCardapio()">Novo cardápio</ion-button>
+    </div>
+  } @else {
+    <!-- capture="environment": no celular abre a câmera traseira; no PC abre o seletor de arquivos -->
+    <input
+      #arquivo
+      type="file"
+      accept="image/*"
+      capture="environment"
+      hidden
+      (change)="aoEscolherArquivo($event)"
+    />
+
+    @if (previewUrl(); as url) {
+      <img class="preview" [src]="url" alt="Foto do cardápio" />
+    }
+
+    <ion-button expand="block" [fill]="foto() ? 'outline' : 'solid'" [disabled]="preparando() || enviando()" (click)="arquivo.click()">
+      @if (preparando()) {
+        <ion-spinner name="crescent"></ion-spinner>
+      } @else {
+        <ion-icon slot="start" name="camera"></ion-icon>
+        {{ foto() ? 'Trocar foto' : 'Tirar foto ou escolher imagem' }}
+      }
+    </ion-button>
+
+    <ion-item>
+      <ion-select
+        label="Idioma do cardápio"
+        labelPlacement="floating"
+        placeholder="Escolha o idioma"
+        [value]="idioma()"
+        [disabled]="enviando()"
+        (ionChange)="aoMudarIdioma($event.detail.value)"
+      >
+        @for (i of idiomas; track i.codigo) {
+          <ion-select-option [value]="i.codigo">{{ i.nome }}</ion-select-option>
+        }
+      </ion-select>
+    </ion-item>
+
+    <ion-button expand="block" [disabled]="!foto() || !idioma() || enviando() || preparando()" (click)="continuar()">
+      @if (enviando()) {
+        <ion-spinner name="crescent"></ion-spinner>
+      } @else {
+        Continuar
+      }
+    </ion-button>
+  }
+</ion-content>
